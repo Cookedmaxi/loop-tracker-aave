@@ -54,11 +54,38 @@ export interface ReserveRow {
   borrow_apy: number; supply_apy: number; reserve_price: number;
 }
 
-/** Current data for one reserve of a market, e.g. ("ethereum-core-v3", rsETH address). */
-export async function reserveLatest(marketKey: string, reserve: Address): Promise<{ row: ReserveRow | null; lastUpdated: string | null }> {
-  const { data, lastUpdated } = await get<ReserveRow[] | ReserveRow>(`/v1/aave/reserves/${marketKey}/${reserve}/latest`, true);
-  const row = Array.isArray(data) ? data[0] ?? null : data ?? null;
-  return { row: row ? { ...row, deposits: Number(row.deposits), borrows: Number(row.borrows), available_liquidity: Number(row.available_liquidity), utilization: Number(row.utilization), borrow_apy: Number(row.borrow_apy), supply_apy: Number(row.supply_apy), reserve_price: Number(row.reserve_price) } : null, lastUpdated };
+const toRow = (r: any): ReserveRow => ({
+  ...r, deposits: Number(r.deposits), borrows: Number(r.borrows), available_liquidity: Number(r.available_liquidity),
+  utilization: Number(r.utilization), borrow_apy: Number(r.borrow_apy), supply_apy: Number(r.supply_apy), reserve_price: Number(r.reserve_price),
+});
+const describe = (d: unknown) => Array.isArray(d) ? `array of ${d.length}${d[0] ? ` (fields: ${Object.keys(d[0]).slice(0, 8).join(", ")})` : ""}` : d && typeof d === "object" ? `object (fields: ${Object.keys(d).slice(0, 8).join(", ")})` : String(d);
+const matches = (r: any, reserve: string) => [r?.reserve_address, r?.reserve, r?.underlying_asset, r?.address].some((a) => typeof a === "string" && a.toLowerCase() === reserve.toLowerCase());
+
+/**
+ * Current data for one reserve of a market, e.g. ("ethereum-core-v3", rsETH address).
+ * Tries the address in lowercase, then as given, then the market's full reserve list.
+ * `tried` says what each attempt returned, for the Data tab.
+ */
+export async function reserveLatest(marketKey: string, reserve: Address): Promise<{ row: ReserveRow | null; lastUpdated: string | null; tried: string[] }> {
+  const tried: string[] = [];
+  const paths = [...new Set([`/v1/aave/reserves/${marketKey}/${reserve.toLowerCase()}/latest`, `/v1/aave/reserves/${marketKey}/${reserve}/latest`])];
+  for (const path of paths) {
+    try {
+      const { data, lastUpdated } = await get<any>(path, true);
+      const row = Array.isArray(data) ? data.find((r) => matches(r, reserve)) ?? data[0] : data;
+      if (row && row.deposits !== undefined) return { row: toRow(row), lastUpdated, tried };
+      tried.push(`${path} → ${describe(data)}`);
+    } catch (e) { tried.push(`${path} → ${e instanceof Error ? e.message : "failed"}`); if (e instanceof Error && /401|403/.test(e.message)) throw e; }
+  }
+  try {
+    const path = `/v1/aave/reserves/${marketKey}/latest`;
+    const { data, lastUpdated } = await get<any>(path, true);
+    const list = Array.isArray(data) ? data : Array.isArray(data?.reserves) ? data.reserves : [];
+    const row = list.find((r: any) => matches(r, reserve));
+    if (row && row.deposits !== undefined) return { row: toRow(row), lastUpdated, tried };
+    tried.push(`${path} → ${describe(data)}`);
+  } catch (e) { tried.push(`/v1/aave/reserves/${marketKey}/latest → ${e instanceof Error ? e.message : "failed"}`); }
+  return { row: null, lastUpdated: null, tried };
 }
 
 export interface LiquidationRow {

@@ -18,7 +18,7 @@ async function timed(name: string, usedFor: string, fn: () => Promise<{ detail: 
     const r = await fn();
     return { name, usedFor, ok: r.ok === undefined ? true : r.ok, ms: Date.now() - t, detail: r.detail, asOf: r.asOf ?? null };
   } catch (e) {
-    return { name, usedFor, ok: false, ms: Date.now() - t, detail: e instanceof Error ? e.message.split("\n")[0].slice(0, 200) : "Failed", asOf: null };
+    return { name, usedFor, ok: false, ms: Date.now() - t, detail: e instanceof Error ? e.message.split("\n")[0].slice(0, 400) : "Failed", asOf: null };
   }
 }
 
@@ -33,8 +33,8 @@ export async function GET() {
     timed("TokenLogic API · reserve data", "Supply, price, utilization, supply and borrow APY of the reserve; liquidations on the market (needs TOKENLOGIC_API_KEY).", async () => {
       if (!hasTokenLogicKey()) return { detail: "No TOKENLOGIC_API_KEY set: the site uses on-chain figures and public rates instead.", ok: null };
       const r = await resolveReserve(asset);
-      const { row, lastUpdated } = await reserveLatest(AAVE_V3_CORE.marketKey, r.underlying);
-      return { detail: row ? `${asset.symbol}: ${Number(row.deposits).toLocaleString("en-US", { maximumFractionDigits: 0 })} deposited` : `No row for ${asset.symbol}`, asOf: lastUpdated, ok: !!row };
+      const { row, lastUpdated, tried } = await reserveLatest(AAVE_V3_CORE.marketKey, r.underlying);
+      return { detail: row ? `${asset.symbol}: ${Number(row.deposits).toLocaleString("en-US", { maximumFractionDigits: 0 })} deposited` : `Key accepted, but no ${asset.symbol} row. Tried: ${tried.join(" | ")}`, asOf: lastUpdated, ok: !!row };
     }),
     timed("TokenLogic API · public rates", "Supply and borrow APY when no API key is set.", async () => {
       const r = await latestRate(asset.symbol, AAVE_V3_CORE.ratesMarket, AAVE_V3_CORE.chain);
