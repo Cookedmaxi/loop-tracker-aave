@@ -1,106 +1,114 @@
 [
- {
-  "entity": "Lido Earn",
-  "kind": "Client · Mellow vault",
-  "approach": "Contact directly",
-  "status": "Client. Migration to wstETH already underway.",
-  "website": "https://lido.fi",
-  "x": "https://x.com/LidoFinance"
- },
- {
-  "entity": "CIAN",
-  "kind": "Protocol",
-  "approach": "Contact directly",
-  "status": "Runs a dedicated rsETH yield product. Operator of the strategy contract still to confirm.",
-  "website": "https://cian.app",
-  "x": "https://x.com/CIAN_protocol"
- },
- {
-  "entity": "Aleph",
-  "kind": "Protocol · built by Othentic",
-  "approach": "Contact directly",
-  "status": "Two Safes; one is already moving to wstETH.",
-  "website": "https://github.com/AlephFi",
-  "x": "https://x.com/AlephFi"
- },
- {
-  "entity": "Contango user",
-  "kind": "User position through Contango",
-  "approach": "Contact through Contango",
-  "status": "One position opened by a Contango user through a Contango proxy. The user is not identified.",
-  "website": "https://contango.xyz",
-  "x": "https://x.com/Contango_xyz"
- },
- {
-  "entity": "Kelp",
-  "kind": "rsETH issuer",
-  "approach": "To confirm",
-  "status": "Check whether whale #3 is theirs. They will probably not help.",
-  "website": "https://kelpdao.xyz",
-  "x": "https://x.com/KelpDAO"
- },
- {
-  "entity": "Unknown whale",
-  "kind": "Unidentified",
-  "approach": "On-chain message",
-  "status": "Short on-chain message from a public TokenLogic address, pointing to the Aave forum post and the official contact. Announce on the forum or X first.",
-  "website": "",
-  "x": ""
- },
- {
-  "entity": "Aave",
-  "kind": "Protocol",
-  "approach": "",
-  "status": "",
-  "website": "https://aave.com",
-  "x": "https://x.com/aave"
- },
- {
-  "entity": "Mellow",
-  "kind": "Protocol",
-  "approach": "",
-  "status": "",
-  "website": "https://mellow.finance",
-  "x": "https://x.com/mellowprotocol"
- },
- {
-  "entity": "Lido",
-  "kind": "Protocol",
-  "approach": "",
-  "status": "",
-  "website": "https://lido.fi",
-  "x": "https://x.com/LidoFinance"
- },
- {
-  "entity": "StakeWise Boost",
-  "kind": "Protocol · leveraged osETH staking",
-  "approach": "Engage StakeWise (issuer) on migrating Boost users",
-  "status": "13 of the 15 largest osETH positions are Boost proxies (EthAaveLeverageStrategy). Each proxy belongs to one user; StakeWise controls the strategy, not the funds.",
-  "website": "https://stakewise.io",
-  "x": ""
- },
- {
-  "entity": "Summer.fi",
-  "kind": "Protocol · position manager",
-  "approach": "Users act through Summer.fi DPM accounts; reach users via Summer.fi",
-  "status": "Several rETH positions are Summer.fi DeFi Position Manager accounts.",
-  "website": "https://summer.fi",
-  "x": ""
- },
- {
-  "entity": "RockSolid",
-  "kind": "Protocol · rETH vault",
-  "approach": "Contact the vault team",
-  "status": "rETH vault (reth-mpc.vaults.rocksolidnetwork.eth) borrows against rETH on Core.",
-  "website": "",
-  "x": ""
- },
- {
-  "entity": "caramila.eth",
-  "kind": "Individual · ENS",
-  "approach": "Unknown",
-  "status": "Owns a StakeWise Boost osETH loop and a DSProxy borrowing against tBTC.",
-  "website": "",
-  "x": ""
- }
+  {
+    "entity": "Lido Earn",
+    "kind": "Client · Mellow vault",
+    "approach": "Contact directly",
+    "status": "Client. Migration to wstETH already underway.",
+    "website": "https://lido.fi",
+    "x": "https://x.com/LidoFinance"
+  },
+  {
+    "entity": "CIAN",
+    "kind": "Protocol",
+    "approach": "Contact directly",
+    "status": "Runs a dedicated rsETH yield product. Operator of the strategy contract still to confirm.",
+    "website": "https://cian.app",
+    "x": "https://x.com/CIAN_protocol"
+  },
+  {
+    "entity": "Aleph",
+    "kind": "Protocol · built by Othentic",
+    "approach": "Contact directly",
+    "status": "Two Safes; one is already moving to wstETH.",
+    "website": "https://github.com/AlephFi",
+    "x": "https://x.com/AlephFi"
+  },
+  {
+    "entity": "Contango user",
+    "kind": "User position through Contango",
+    "approach": "Contact through Contango",
+    "status": "One position opened by a Contango user through a Contango proxy. The user is not identified.",
+    "website": "https://contango.xyz",
+    "x": "https://x.com/Contango_xyz"
+  },
+  {
+    "entity": "Kelp",
+    "kind": "rsETH issuer",
+    "approach": "To confirm",
+    "status": "Check whether whale #3 is theirs. They will probably not help.",
+    "website": "https://kelpdao.xyz",
+    "x": "https://x.com/KelpDAO"
+  },
+  {
+    "entity": "Unknown whale",
+    "kind": "Unidentified",
+    "approach": "On-chain message",
+    "status": "Short on-chain message from a public TokenLogic address, pointing to the Aave forum post and the official contact. Announce on the forum or X first.",
+    "website": "",
+    "x": ""
+  },
+  {
+    "entity": "Aave",
+    "kind": "Protocol",
+    "approach": "",
+    "status": "",
+    "website": "https://aave.com",
+    "x": "https://x.com/aave"
+  },
+  {
+    "entity": "Mellow",
+    "kind": "Protocol",
+    "approach": "",
+    "status": "",
+    "website": "https://mellow.finance",
+    "x": "https://x.com/mellowprotocol"
+  },
+  {
+    "entity": "Lido",
+    "kind": "Protocol",
+    "approach": "",
+    "status": "",
+    "website": "https://lido.fi",
+    "x": "https://x.com/LidoFinance"
+  },
+  {
+    "entity": "StakeWise Boost",
+    "kind": "Protocol · leveraged osETH staking",
+    "approach": "Engage StakeWise (issuer) on migrating Boost users",
+    "status": "13 of the 15 largest osETH positions are Boost proxies (EthAaveLeverageStrategy). Each proxy belongs to one user; StakeWise controls the strategy, not the funds.",
+    "website": "https://stakewise.io",
+    "x": ""
+  },
+  {
+    "entity": "Summer.fi",
+    "kind": "Protocol · position manager",
+    "approach": "Users act through Summer.fi DPM accounts; reach users via Summer.fi",
+    "status": "Several rETH positions are Summer.fi DeFi Position Manager accounts.",
+    "website": "https://summer.fi",
+    "x": ""
+  },
+  {
+    "entity": "RockSolid",
+    "kind": "Protocol · rETH vault",
+    "approach": "Contact the vault team",
+    "status": "rETH vault (reth-mpc.vaults.rocksolidnetwork.eth) borrows against rETH on Core.",
+    "website": "",
+    "x": ""
+  },
+  {
+    "entity": "caramila.eth",
+    "kind": "Individual · ENS",
+    "approach": "Unknown",
+    "status": "Owns a StakeWise Boost osETH loop and a DSProxy borrowing against tBTC.",
+    "website": "",
+    "x": ""
+  },
+  {
+    "entity": "Galaxy Digital",
+    "kind": "Trading firm · likely, medium confidence",
+    "approach": "Contact directly; confirm ownership first",
+    "status": "Likely owner of the #2 rsETH loop (Safe 0x40E9…AbA8). Evidence: the Safe's signers 0x8c2a and 0xe32e trade with Galaxy Digital, and $55.6M was withdrawn from Galaxy (team borrower sheet, medium confidence).",
+    "website": "https://www.galaxy.com",
+    "x": "https://x.com/galaxyhq"
+  }
 ]

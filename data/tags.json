@@ -1,6 +1,6 @@
 [
   {"match": "0xCDfA7EfE670869c6b6be4375654E0b206eF49c89", "label": "Lido Earn · Mellow subvault", "entity": "Lido Earn", "kind": "Loop holder"},
-  {"match": "0x40E9…AbA8", "label": "Whale #2", "entity": "Unknown whale", "kind": "Loop holder"},
+  {"match": "0x40e93a52f6af9fcd3b476aedadd7feabd9f7aba8", "label": "Galaxy Digital (likely) · Safe", "entity": "Galaxy Digital", "kind": "Loop holder"},
   {"match": "0xf746…3010", "label": "Whale #3", "entity": "Unknown whale", "kind": "Loop holder"},
   {"match": "0x7550…4e60", "label": "Whale #4", "entity": "Unknown whale", "kind": "Loop holder"},
   {"match": "0xd849…562d", "label": "Whale #5", "entity": "Unknown whale", "kind": "Loop holder"},
