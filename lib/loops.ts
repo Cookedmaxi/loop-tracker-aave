@@ -201,8 +201,12 @@ export function getHoldersTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
 /** Recent Aave actions and token transfers of one wallet. */
 export function getWalletTx(asset: LoopAsset, wallet: Address, fresh = false): Promise<Tx[]> {
   return cached(`tx:wallet:${asset.symbol}:${wallet.toLowerCase()}`, async () => {
-    const { reserve, ranks } = await context(asset, false);
-    const events = readPoolEvents(reserve, { wallets: [wallet] });
+    const { reserve, loops, ranks } = await context(asset, false);
+    // Read with every tracked holder so the saved history is shared with the holders feed.
+    const tracked = loops.positions.map((p) => p.address);
+    const w = wallet.toLowerCase();
+    const events = readPoolEvents(reserve, { wallets: tracked.some((t) => t.toLowerCase() === w) ? tracked : [...tracked, wallet] })
+      .then((all) => all.filter((e) => e.wallet.toLowerCase() === w));
     const raw = await getAddressTransfers(wallet, 50).catch(() => [] as RawTransfer[]);
     return combine(reserve, ranks, events, [{ wallet, raw }], new Set([wallet.toLowerCase()]));
   }, fresh);

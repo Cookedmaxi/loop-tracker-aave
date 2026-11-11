@@ -53,7 +53,8 @@ Commit and push; Vercel redeploys.
 - Health factor, leverage and drop to liquidation are for the **whole wallet** on Aave (all collateral, all debt), which is what decides liquidation.
 - Max LTV and liquidation threshold on the Market tab are the reserve's base settings, outside e-mode.
 - "Debt against the market" is the debt of the tracked holders only.
-- Aave actions are the Pool's own events over the last ~30 days per holder (`AAVE_EVENTS_LOOKBACK_BLOCKS`, default 216 000) and ~7 days for the market feed, read in windows of `LOGS_BLOCK_RANGE` blocks (default 10 000; lower it if the RPC refuses). Timestamps are block times. If the event read fails, the site falls back to aToken and debt-token mints and burns from Blockscout.
+- Aave actions are the Pool's own events over the last ~30 days per holder (`AAVE_EVENTS_LOOKBACK_BLOCKS`, default 216 000) and ~7 days for the market feed. The history is read once (about 140 `eth_getLogs`) and saved in Upstash; after that each refresh reads only the new blocks, one call per feed. If the RPC refuses a block span, it is split automatically. Timestamps are block times. If the event read fails, the site falls back to aToken and debt-token mints and burns from Blockscout.
 - Other transfers: latest ~50 per market, ~25 per holder, from Blockscout.
 - Answers are cached for 60 seconds per server instance (`CACHE_SECONDS`), so repeated clicks do not burn RPC quota. Refresh bypasses the cache.
+- RPC usage with the page open all day: roughly 350 Alchemy compute units a minute, about 15M a month, inside Alchemy's free 30M.
 - The site is up to date whenever someone is looking at it, but does nothing while nobody is: no stored history, no alerts sent. Day-over-day changes and Telegram alerts need a scheduled job (Vercel Cron) writing snapshots to the database.
