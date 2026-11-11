@@ -164,6 +164,7 @@ export default function Page() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<{ asset: string; address: string } | null>(null);
+  const [urlReady, setUrlReady] = useState(false);
   const [tx, setTx] = useState<Record<string, Tx[]>>({});
   const [txBusy, setTxBusy] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
@@ -221,7 +222,18 @@ export default function Page() {
   useEffect(() => {
     const fromHash = window.location.hash.replace("#", "") as TabId;
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
-    getJson<Meta>("/api/assets").then((m) => setMeta(m)).catch((e) => setErrors({ site: e.message }));
+    // Shared links: ?asset=rsETH&holder=0x…#loops opens that asset with that holder selected.
+    const q = new URLSearchParams(window.location.search);
+    getJson<Meta>("/api/assets").then((m) => {
+      setMeta(m);
+      const a = m.assets.find((x) => x.symbol.toLowerCase() === (q.get("asset") ?? "").toLowerCase());
+      if (a) setPicked([a.symbol]);
+      const h = q.get("holder");
+      // On All assets, the holder's asset travels as "of".
+      const of = a ?? m.assets.find((x) => x.symbol.toLowerCase() === (q.get("of") ?? "").toLowerCase());
+      if (of && h && /^0x[0-9a-fA-F]{40}$/.test(h)) setSel({ asset: of.symbol, address: h });
+      setUrlReady(true);
+    }).catch((e) => setErrors({ site: e.message }));
     getJson<RegistryData>("/api/registry").then(setRegistry).catch(() => setRegistry({ entities: [], tags: [] }));
     loadCommunity();
   }, [loadLoops, loadCommunity]);
@@ -260,11 +272,23 @@ export default function Page() {
     return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", onShow); };
   }, [loadLoops, loadTx]);
 
-  const openTab = (id: TabId) => { setTab(id); window.history.replaceState(null, "", `#${id}`); };
+  const openTab = (id: TabId) => setTab(id);
+  // The address bar always reflects what is on screen, so any view can be copied and shared.
+  useEffect(() => {
+    if (!urlReady) return;
+    const q = new URLSearchParams();
+    if (picked.length === 1) q.set("asset", picked[0]);
+    if (sel && tab === "loops" && (picked.length !== 1 || sel.asset === picked[0])) {
+      if (picked.length !== 1) q.set("of", sel.asset);
+      q.set("holder", sel.address);
+    }
+    const next = `${window.location.pathname}${q.toString() ? `?${q}` : ""}#${tab}`;
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) window.history.replaceState(null, "", next);
+  }, [urlReady, picked, sel, tab]);
 
   const positions = useMemo(() => shown.flatMap((a) => (loops[a.symbol]?.positions ?? []).map((p) => ({ asset: a.symbol, p }))), [shown, loops]);
   const largest = useMemo(() => positions.reduce<Row | null>((b, x) => (!b || x.p.debtUsd > b.p.debtUsd ? x : b), null), [positions]);
-  const current = positions.find((x) => sel && x.asset === sel.asset && x.p.address === sel.address) ?? (shown.length > 1 ? largest : positions[0]) ?? null;
+  const current = positions.find((x) => sel && x.asset === sel.asset && x.p.address.toLowerCase() === sel.address.toLowerCase()) ?? (shown.length > 1 ? largest : positions[0]) ?? null;
   const asOf = shown.map((a) => loops[a.symbol]?.asOf).filter(Boolean).sort()[0];
 
   return (
@@ -470,7 +494,10 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
     <div className="panel">
       <div className="panel-head">
         <h2>Selected position</h2>
-        <p className="hint num">#{p.rank} on {asset}</p>
+        <div className="head-actions">
+          <p className="hint num">#{p.rank} on {asset}</p>
+          <CopyLink asset={asset} address={p.address} />
+        </div>
       </div>
       <div className="body">
         <div className="dmeta">
@@ -1269,7 +1296,7 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
               {rows.map((x) => (
                 <tr key={x.address}>
                   <td className="muted">{x.rank}</td>
-                  <td data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a></td>
+                  <td data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a>{x.debtBackedUsd >= 10_000 || x.rank <= 12 ? <a className="open-site" href={`/?asset=${s}&holder=${x.address}#loops`} title="Open this position on the site">position ↗</a> : null}</td>
                   <td className="r" data-label="Supplied">{num4(x.supplied)}</td>
                   <td className="r" data-label="Share">{x.sharePct < 0.1 ? "<0.1%" : pct(x.sharePct)}</td>
                   <td data-label="Loops?"><span className={`status ${x.kind === "Loop" ? "wait" : x.kind === "Supply only" ? "pending" : "done"}`}>{kindLabel(x, s)}</span></td>
@@ -1292,7 +1319,7 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
               {m.loops.map((x) => (
                 <tr key={x.address}>
                   <td className="muted">{x.rank}</td>
-                  <td className="who" data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a><span className="sub">{x.tag ?? (x.isContract ? x.contractName ?? "Contract" : "EOA")}{x.spark ? " · also on Spark" : ""}</span></td>
+                  <td className="who" data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a>{x.debtBackedUsd >= 10_000 || x.rank <= 12 ? <a className="open-site" href={`/?asset=${s}&holder=${x.address}#loops`} title="Open this position on the site">position ↗</a> : null}<span className="sub">{x.tag ?? (x.isContract ? x.contractName ?? "Contract" : "EOA")}{x.spark ? " · also on Spark" : ""}</span></td>
                   <td className="r" data-label="Collateral">{usd(x.suppliedUsd)}</td>
                   <td data-label="Debt">{x.debts.slice(0, 2).map((d) => `${num4(d.amount)} ${d.symbol}`).join(" + ")}</td>
                   <td className={`r ${x.debtPerUnit && x.debtPerUnit > 1 ? "warn" : ""}`} data-label="Debt ÷ units">{x.debtPerUnit?.toFixed(3) ?? DASH}</td>
@@ -2211,4 +2238,20 @@ function OffboardingCalendar({ plans, baselineDate, title }: { plans: PlanRespon
       </div>
     </div>
   );
+}
+
+
+/** Link that opens the site on this asset with this holder selected. */
+function holderLink(asset: string, address: string) {
+  return `${window.location.origin}/?asset=${encodeURIComponent(asset)}&holder=${address}#loops`;
+}
+
+function CopyLink({ asset, address }: { asset: string; address: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    const url = holderLink(asset, address);
+    try { await navigator.clipboard.writeText(url); } catch { window.prompt("Link to this position", url); return; }
+    setDone(true); window.setTimeout(() => setDone(false), 1600);
+  };
+  return <button className="chip plain small" onClick={copy} title="Copy a link that opens the site on this position">{done ? "Link copied" : "Copy link"}</button>;
 }
