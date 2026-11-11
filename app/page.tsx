@@ -280,7 +280,7 @@ export default function Page() {
     if (!urlReady) return;
     const q = new URLSearchParams();
     if (picked.length === 1) q.set("asset", picked[0]);
-    if (lookupQ) q.set("lookup", lookupQ);
+    if (lookupQ && tab === "loops") q.set("lookup", lookupQ);
     if (sel && tab === "loops" && (picked.length !== 1 || sel.asset === picked[0])) {
       if (picked.length !== 1) q.set("of", sel.asset);
       q.set("holder", sel.address);
@@ -303,14 +303,12 @@ export default function Page() {
           <span className="slash">/</span>
           <span className="brand-name">Core Offboarding Monitor</span>
         </div>
-        <SearchBox className="search-m" onSearch={(v) => setLookupQ(v)} />
         <nav className="nav" role="tablist" aria-label="Sections">
           {TABS.map((t) => (
             <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => openTab(t.id)}>{t.label}</button>
           ))}
         </nav>
         <div className="tools">
-          <SearchBox onSearch={(v) => setLookupQ(v)} />
           {assets.length ? (
             <label className="asset-pick">
               {shown.length === 1 ? <AssetLogo symbol={shown[0].symbol} src={shown[0].logo} /> : <AssetStack assets={assets} />}
@@ -333,11 +331,12 @@ export default function Page() {
           <p className="error" key={key} role="alert"><strong>{key === "site" ? "Site" : key}:</strong> {message}</p>
         ))}
         {!meta && !errors.site ? <p className="empty">Loading…</p> : null}
-        {lookupQ ? <LookupPanel key={lookupQ} query={lookupQ} logoOf={logoOf} colors={colors} onClose={() => setLookupQ(null)}
-          onOpen={(asset, address) => { setPicked([asset]); setSel({ asset, address }); setTab("loops"); setLookupQ(null); window.scrollTo({ top: 0 }); }} /> : null}
 
         {tab === "loops" ? (
           <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community} onAsset={(s) => { setPicked([s]); setSel(null); }}
+            onSearch={(v) => setLookupQ(v)}
+            lookup={lookupQ ? <LookupPanel key={lookupQ} query={lookupQ} logoOf={logoOf} colors={colors} onClose={() => setLookupQ(null)}
+              onOpen={(asset, address) => { setPicked([asset]); setSel({ asset, address }); setLookupQ(null); }} /> : null}
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
         {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} onAll={() => { setPicked([]); setSel(null); }} /> : null}
@@ -365,6 +364,7 @@ function LoopsTab(props: {
   shown: Shown; loops: Record<string, LoopsResponse>; busy: boolean; positions: Row[]; current: Row | null; hfAlert: number;
   colors: Map<string, string>; logoOf: (s: string) => string | undefined; onPick: (asset: string, address: string) => void;
   communityOf: Map<string, CommunityTag>; community: CommunityTag[]; onAsset: (symbol: string) => void;
+  onSearch: (v: string) => void; lookup: React.ReactNode;
 }) {
   const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
@@ -393,10 +393,11 @@ function LoopsTab(props: {
         );
       })}
 
+      {props.lookup}
       <div className="master">
         <div className="panel master-list">
           <div className="panel-head">
-            <h2>Positions</h2>
+            <div className="head-actions"><h2>Positions</h2><SearchBox onSearch={props.onSearch} /></div>
             <p className="hint">{many ? `${positions.length} positions across ${shown.length} assets, largest debt first · select a row` : scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
           </div>
           {positions.length ? (

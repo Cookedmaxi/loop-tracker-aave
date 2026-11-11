@@ -443,12 +443,7 @@ td.neg, span.neg { color: var(--red); }
 .lookup-meta .links { margin-left: auto; display: flex; gap: 6px; }
 tr.dim td { opacity: .45; }
 @media (max-width: 900px) { .search input { width: 160px; } }
-.search-m { display: none; }
 .brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lookup-meta { flex-direction: row; justify-content: flex-start; text-align: left; }
-@media (max-width: 900px) {
-  .bar { grid-template-areas: "brand tools" "search search" "nav nav"; }
-  .tools .search { display: none; }
-  .search-m { display: flex; grid-area: search; }
-  .search-m input { width: 100%; }
-}
+.master-list .panel-head { gap: 10px; flex-wrap: wrap; }
+@media (max-width: 700px) { .master-list .head-actions { width: 100%; } .master-list .search { flex: 1; } .master-list .search input { width: 100%; } }
