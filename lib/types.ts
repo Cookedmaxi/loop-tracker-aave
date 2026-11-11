@@ -129,20 +129,35 @@ export interface PlanChange {
 }
 
 export interface PlanResponse {
-  symbol: string; debtSymbol: string; title: string; source: string;
-  resolution: string; path: "rate" | "lt"; pathLabel: string;
+  symbol: string; debtSymbol: string; title: string; source: string; url: string;
+  resolution: string; pathLabel: string;
   notes: string[]; warnings: string[];
-  baseline: { date: string; collateralUsd: number; debtUsd: number; debtTokens: number | null; supplied: number | null; block: number | null };
+  baseline: { date: string; collateralUsd: number; debtUsd: number; revenueUsd: number; debtTokens: number | null; supplied: number | null; block: number | null };
   now: { debt: number; debtUsd: number; supplied: number; positions: number; asOf: string };
   history: PlanDay[];
-  triggers: { label: string; rule: string; debtBelowUsd: number; met: boolean }[];
-  steps: { month: number; label: string; condition: string | null; doneAt: string | null; txHash: string | null }[];
-  monthRule: { startedAt: string; due: string; startDebt: number | null; fellPct: number | null; secondStepNeeded: boolean | null } | null;
+  steps: { stage: string; label: string; note: string | null; detail: string | null; doneAt: string | null; txHash: string | null; tracked: boolean }[];
+  trend: { change7Pct: number | null; change30Pct: number | null; declining: boolean | null; perWeekTokens: number | null };
+  swap: { into: string[]; movedUsd: number; rsethCollUsd: number; sharePct: number | null };
   carry: {
     yieldPct: number | null; borrowPct: number; borrowAvg30Pct: number | null; reserveFactorPct: number; exchangeRate: number;
-    planYieldPct: number; planBorrowPct: number; planBreakevenBps: number;
     avgLeverage: number | null; roe: { bps: number; pct: number | null }[]; breakevenBps: number | null;
-    positions: { address: Address; rank: number; label: string | null; leverage: number | null; debtUsd: number; roe: { bps: number; pct: number | null }[]; breakevenBps: number | null }[];
+    positions: { address: Address; rank: number; label: string | null; leverage: number | null; debtUsd: number; movedUsd: number; rsethUsd: number; roe: { bps: number; pct: number | null }[]; breakevenBps: number | null }[];
   } | null;
   changes: PlanChange[];
+}
+
+// ── Market tab: issuer risk ─────────────────────────────────────────────────
+
+export interface RiskResponse {
+  symbol: string; issuer: string; website: string; readAt: string;
+  exchangeRate: number; aaveRate: number; rateSource: string;
+  market: { priceEth: number; priceUsd: number; change24hPct: number | null; pegPct: number; source: string } | null;
+  supply: number; onAave: number; onAavePct: number | null; depositsPaused: boolean | null;
+  backing: { symbol: string; address: string; tokens: number | null; ethPrice: number | null; eth: number | null; sharePct: number | null }[];
+  backedEth: number | null; backingPerToken: number | null;
+  exit: { text: string; source: string };
+  findings: { area: string; text: string }[];
+  findingsSource: { label: string; date: string };
+  incidents: { date: string; title: string; text: string; links: { label: string; url: string }[] }[];
+  warnings: string[];
 }

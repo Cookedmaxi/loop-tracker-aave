@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, PlanResponse, Position, Tag, Tx } from "@/lib/types";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ const fmt = (n: number | null | undefined, digits = 0) =>
   n === null || n === undefined || !Number.isFinite(n) ? DASH : n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtAmount = (n: number) => fmt(n, Math.abs(n) >= 100 ? 0 : Math.abs(n) >= 1 ? 2 : 4);
 const usd = (n: number | null | undefined) =>
-  n === null || n === undefined || !Number.isFinite(n) ? DASH : n >= 1e9 ? `$${fmt(n / 1e9, 2)}B` : n >= 1e6 ? `$${fmt(n / 1e6, 1)}M` : `$${fmt(n, 0)}`;
+  n === null || n === undefined || !Number.isFinite(n) ? DASH : n >= 1e9 ? `$${fmt(n / 1e9, 2)}B` : n >= 1e7 ? `$${fmt(n / 1e6, 1)}M` : n >= 1e6 ? `$${fmt(n / 1e6, 2)}M` : `$${fmt(n, 0)}`;
 const pct = (n: number | null | undefined, digits = 1) => (n === null || n === undefined || !Number.isFinite(n) ? DASH : `${fmt(n, digits)}%`);
 const short = (a: string | null | undefined) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : DASH);
 const when = (iso: string) => {
@@ -574,63 +574,92 @@ function useNarrow(query = "(max-width: 700px)") {
   return narrow;
 }
 
+/** Daily debt of the loops; hover or touch a day to read it. */
 function DebtChart({ plan }: { plan: PlanResponse }) {
   const narrow = useNarrow();
+  const [hover, setHover] = useState<number | null>(null);
   const pts = plan.history;
   if (pts.length < 2) return <p className="empty">The daily history fills in once the RPC serves past blocks.</p>;
   // Drawn at the size it is shown, so labels stay readable on a phone.
-  const W = narrow ? 340 : 640, H = narrow ? 220 : 230, L = narrow ? 40 : 52, R = 10, T = 16, B = 28;
-  const price = plan.now.debt > 0 ? plan.now.debtUsd / plan.now.debt : 0;
-  const trig = plan.triggers[0] && price ? plan.triggers[0].debtBelowUsd / price : null;
-  const max = Math.max(...pts.map((p) => p.debt), plan.now.debt) * 1.08;
+  const W = narrow ? 340 : 640, H = narrow ? 220 : 240, L = narrow ? 44 : 56, R = 12, T = 22, B = 28;
+  const values = pts.map((p) => p.debt);
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const pad = Math.max((hi - lo) * 0.15, hi * 0.01);
+  const min = Math.max(0, lo - pad), max = hi + pad;
   const x = (i: number) => L + (i / (pts.length - 1)) * (W - L - R);
-  const y = (v: number) => T + (1 - v / max) * (H - T - B);
+  const y = (v: number) => T + (1 - (v - min) / (max - min)) * (H - T - B);
   const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.debt).toFixed(1)}`).join(" ");
-  const area = `${line} L${x(pts.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+  const area = `${line} L${x(pts.length - 1).toFixed(1)},${H - B} L${x(0).toFixed(1)},${H - B} Z`;
   const bi = pts.findIndex((p) => p.date === plan.baseline.date);
-  const ticks = [0, 0.5, 1].map((f) => f * max / 1.08);
-  const k = (v: number) => (v >= 1000 ? `${fmt(v / 1000, 0)}k` : fmt(v, 0));
-  const last = pts[pts.length - 1];
+  const ticks = [min, (min + max) / 2, max];
+  const k = (v: number) => (v >= 1000 ? `${fmt(v / 1000, v >= 100000 ? 0 : 1)}k` : fmt(v, 0));
+
+  const pick = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W;
+    setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((px - L) / (W - L - R)) * (pts.length - 1)))));
+  };
+  const h = hover != null ? pts[hover] : null;
+  const prev = hover != null && hover > 0 ? pts[hover - 1] : null;
+  const vsBase = h && bi >= 0 ? (h.debt / pts[bi].debt - 1) * 100 : null;
+  const leftPct = hover != null ? (x(hover) / W) * 100 : 0;
+
   return (
-    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${plan.debtSymbol} debt of the tracked loops, daily`}>
-      <defs>
-        <linearGradient id="debt-fill" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor="#2468fc" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#2468fc" stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      {ticks.map((v) => (
-        <g key={v}>
-          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" />
-          <text x={L - 8} y={y(v) + 4} textAnchor="end" className="axis">{k(v)}</text>
-        </g>
-      ))}
-      <path d={area} className="area" />
-      <path d={line} className="line" />
-      {bi >= 0 ? (
-        <g>
-          <line x1={x(bi)} x2={x(bi)} y1={T} y2={y(0)} className="mark" />
-          <text x={x(bi) + (narrow ? -6 : 6)} y={T + 10} textAnchor={narrow ? "end" : "start"} className="axis strong">{narrow ? "Baseline" : "Plan baseline"} · {dayLabel(plan.baseline.date)}</text>
-          <circle cx={x(bi)} cy={y(pts[bi].debt)} r={3.5} className="dot-base" />
-        </g>
+    <div className="chart-wrap">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${plan.debtSymbol} debt of the tracked loops, daily`}
+        onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="debt-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#2468fc" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#2468fc" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" />
+            <text x={L - 8} y={y(v) + 4} textAnchor="end" className="axis">{k(v)}</text>
+          </g>
+        ))}
+        <path d={area} className="area" />
+        <path d={line} className="line" />
+        {bi >= 0 ? (
+          <g>
+            <line x1={x(bi)} x2={x(bi)} y1={T - 8} y2={H - B} className="mark" />
+            <text x={x(bi) + (bi > pts.length * 0.7 ? -6 : 6)} y={T - 10} textAnchor={bi > pts.length * 0.7 ? "end" : "start"} className="axis strong">{narrow ? "Baseline" : "ARFC baseline"} · {dayLabel(plan.baseline.date)}</text>
+            <circle cx={x(bi)} cy={y(pts[bi].debt)} r={3.5} className="dot-base" />
+          </g>
+        ) : null}
+        {hover == null ? <circle cx={x(pts.length - 1)} cy={y(pts[pts.length - 1].debt)} r={4} className="dot-now" /> : null}
+        {hover != null && h ? (
+          <g>
+            <line x1={x(hover)} x2={x(hover)} y1={T - 8} y2={H - B} className="guide" />
+            <circle cx={x(hover)} cy={y(h.debt)} r={4.5} className="dot-now" />
+          </g>
+        ) : null}
+        <text x={L} y={H - 8} className="axis">{dayLabel(pts[0].date)}</text>
+        <text x={W - R} y={H - 8} textAnchor="end" className="axis">{dayLabel(pts[pts.length - 1].date)}</text>
+        <rect x={L} y={0} width={W - L - R} height={H} fill="transparent" />
+      </svg>
+      {h ? (
+        <div className={`tip ${leftPct > 60 ? "left" : ""}`} style={{ left: `${leftPct}%` }}>
+          <p className="tip-date">{dayLabel(h.date)} {h.date.slice(0, 4)} · 00:00 UTC</p>
+          <div className="tip-row"><span>{plan.debtSymbol} debt</span><strong>{fmt(h.debt)}</strong></div>
+          <div className="tip-row"><span>Value</span><strong>{usd(h.debtUsd)}</strong></div>
+          {prev ? <div className="tip-row"><span>Day change</span><strong className={h.debt < prev.debt ? "pos" : h.debt > prev.debt ? "warn" : ""}>{h.debt - prev.debt > 0 ? "+" : ""}{fmt(h.debt - prev.debt)}</strong></div> : null}
+          {vsBase != null ? <div className="tip-row"><span>vs baseline</span><strong>{signed(vsBase, 2)}</strong></div> : null}
+          <div className="tip-row"><span>{plan.symbol} on Aave</span><strong>{fmt(h.supplied)}</strong></div>
+          <p className="tip-foot">Block {h.block.toLocaleString("en-US")}</p>
+        </div>
       ) : null}
-      {trig && trig < max ? (
-        <g>
-          <line x1={L} x2={W - R} y1={y(trig)} y2={y(trig)} className="trigger" />
-          <text x={W - R} y={y(trig) - 6} textAnchor="end" className="axis warn">{narrow ? "E-Mode cuts" : plan.triggers[0].label} · {usd(plan.triggers[0].debtBelowUsd)}</text>
-        </g>
-      ) : null}
-      <circle cx={x(pts.length - 1)} cy={y(last.debt)} r={4} className="dot-now" />
-      <text x={L} y={H - 8} className="axis">{dayLabel(pts[0].date)}</text>
-      <text x={W - R} y={H - 8} textAnchor="end" className="axis">{dayLabel(last.date)}</text>
-    </svg>
+    </div>
   );
 }
 
-function StepStatus({ s }: { s: PlanResponse["steps"][number] }) {
+function StepStatus({ s, plan }: { s: PlanResponse["steps"][number]; plan: PlanResponse }) {
   if (s.doneAt) return <span className="status done">Done{s.doneAt !== "before tracking" ? ` · ${dayLabel(s.doneAt.slice(0, 10))}` : ""}</span>;
-  if (s.condition) return <span className="status wait">Conditional</span>;
-  return <span className="status pending">Pending</span>;
+  if (!s.tracked) return plan.trend.declining == null ? <span className="status pending">Ongoing</span> : plan.trend.declining ? <span className="status done">Exposure falling</span> : <span className="status wait">Not falling</span>;
+  if (s.stage.startsWith("Follow-up")) return <span className="status pending">Not triggered</span>;
+  return <span className="status pending">Awaiting AIP</span>;
 }
 
 function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => string | undefined }) {
@@ -651,30 +680,31 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
   if (plan === undefined) return <div className="panel"><p className="empty">Reading {asset.symbol}’s offboarding progress from the chain… The first visit backfills the daily history.</p></div>;
   if (plan === null) return <div className="panel"><p className="empty">No offboarding plan is set for {asset.symbol}. Add one in config/plan.ts.</p></div>;
 
-  const b = plan.baseline, n = plan.now, c = plan.carry;
-  const repaidPct = b.debtTokens ? (1 - n.debt / b.debtTokens) * 100 : null;
-  const supplyPct = b.supplied ? (n.supplied / b.supplied - 1) * 100 : null;
+  const b = plan.baseline, n = plan.now, c = plan.carry, tr = plan.trend;
+  const sinceBase = b.debtTokens ? (n.debt / b.debtTokens - 1) * 100 : null;
   const roeNow = c?.roe[0]?.pct ?? null;
+  const stages = [...new Set(plan.steps.map((s) => s.stage))];
   return (
     <>
       <div className="panel">
         <div className="panel-head plan-head">
           <div>
-            <p className="eyebrow">{plan.title}</p>
+            <a className="eyebrow title-link" href={plan.url} target="_blank" rel="noopener noreferrer" title="Read the ARFC on the Aave governance forum">{plan.title} ↗</a>
             <div className="asset-name">
               <AssetLogo symbol={asset.symbol} src={logoOf(asset.symbol)} />
               <a className="title-link" href={asset.etherscanUrl} target="_blank" rel="noopener noreferrer">{asset.symbol}</a>
               <span className="pill">{plan.resolution}</span><span className="pill ghost">{plan.pathLabel}</span>
             </div>
           </div>
-          <p className="hint">Plan figures: {plan.source}. Everything else is read on-chain.</p>
+          <p className="hint">Figures marked ARFC: {plan.source}. Everything else is read on-chain.</p>
         </div>
         <div className="strip inner">
           <Cell label={`${plan.debtSymbol} debt backed`} value={fmt(n.debt)} sub={`${usd(n.debtUsd)} · ${n.positions} loops`} />
-          <Cell label={`Repaid since ${dayLabel(b.date)}`} value={pct(repaidPct)} tone={repaidPct && repaidPct > 0 ? "pos" : ""} sub={b.debtTokens ? `from ${fmt(b.debtTokens)} ${plan.debtSymbol} · plan ${usd(b.debtUsd)}` : `plan ${usd(b.debtUsd)}`} />
-          <Cell label={`${plan.symbol} supplied`} value={fmt(n.supplied)} sub={supplyPct != null ? `${signed(supplyPct)} since ${dayLabel(b.date)}` : undefined} />
-          <Cell label="Loop return on equity" value={signed(roeNow)} tone={roeNow == null ? "" : roeNow > 0 ? "warn" : "pos"} sub={c?.avgLeverage ? `at ${fmt(c.avgLeverage, 1)}x, today’s rates` : undefined} />
-          <Cell label="Rate rise that ends the carry" value={c?.breakevenBps != null ? `+${c.breakevenBps} bps` : DASH} sub={`plan: about +${c?.planBreakevenBps ?? DASH} bps`} />
+          <Cell label={`Since ${dayLabel(b.date)}`} value={signed(sinceBase, 2)} tone={sinceBase != null && sinceBase < 0 ? "pos" : ""} sub={`ARFC baseline ${usd(b.debtUsd)}`} />
+          <Cell label="Exposure, 30 days" value={signed(tr.change30Pct)} tone={tr.declining ? "pos" : tr.declining === false ? "warn" : ""} sub={tr.declining == null ? "needs history" : tr.declining ? "falling: no further measure" : "not falling: follow-up can apply"} />
+          <Cell label={`Moved to ${plan.swap.into.join(", ")}`} value={pct(plan.swap.sharePct)} sub={`${usd(plan.swap.movedUsd)} of the loops’ ETH collateral`} />
+          <Cell label="Loop return on equity" value={signed(roeNow)} tone={roeNow == null ? "" : roeNow > 0 ? "warn" : "pos"} sub={c?.breakevenBps != null ? `negative at +${c.breakevenBps} bps` : undefined} />
+          <Cell label="DAO revenue at stake" value={usd(b.revenueUsd)} sub="a year · ARFC" />
         </div>
       </div>
 
@@ -682,46 +712,37 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
         <div className="panel">
           <div className="panel-head">
             <h2>{plan.debtSymbol} debt of the loops, daily</h2>
-            <p className="hint">Tracked loop positions, 00:00 UTC each day</p>
+            <p className="hint">Hover or tap a day</p>
           </div>
           <div className="body">
             <DebtChart plan={plan} />
-            {plan.triggers.map((t) => {
-              const progress = Math.max(0, Math.min(1, b.debtUsd > t.debtBelowUsd ? (b.debtUsd - n.debtUsd) / (b.debtUsd - t.debtBelowUsd) : 1));
-              return (
-                <div className="trigger-box" key={t.label}>
-                  <div className="kv"><span>{t.label}</span><span className={t.met ? "pos" : ""}>{t.met ? "Reached" : `${usd(n.debtUsd)} to go below ${usd(t.debtBelowUsd)}`}</span></div>
-                  <div className="track"><div style={{ width: `${progress * 100}%` }} /></div>
-                  <p className="step-note">{t.rule} · {fmt(progress * 100, 0)}% of the way from the plan baseline</p>
-                </div>
-              );
-            })}
-            <p className="note">Wallets that left the top holders before today are not counted in past days, so earlier days slightly understate the debt.</p>
+            <div className="kv"><span>Last 7 days</span><span>{signed(tr.change7Pct, 2)}{tr.perWeekTokens != null ? ` · ${fmt(Math.abs(tr.perWeekTokens))} ${plan.debtSymbol} ${tr.perWeekTokens >= 0 ? "repaid" : "added"}` : ""}</span></div>
+            <div className="kv"><span>Last 30 days</span><span>{signed(tr.change30Pct, 2)}</span></div>
+            <p className="note">Tracked loop positions at 00:00 UTC each day. Wallets that left the top holders before today are not counted in past days, so earlier days slightly understate the debt.</p>
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head"><h2>Plan steps</h2><p className="hint">Checked against on-chain changes</p></div>
-          <ol className="steps">
-            {plan.steps.map((s, i) => (
-              <li key={i}>
-                <span className="when">Month {s.month}</span>
-                <div>
-                  <p>{s.label}</p>
-                  {s.condition === "loop-debt-fell-less-than-25pct" ? (
-                    <p className="step-note">Only if loop debt fell less than 25% in the month after the first rate step.
-                      {plan.monthRule ? ` So far: ${pct(plan.monthRule.fellPct)} lower, decided ${dayLabel(plan.monthRule.due.slice(0, 10))} → ${plan.monthRule.secondStepNeeded ? "second step needed" : "second step not needed"}.` : " Starts when the first rate step executes."}
-                    </p>
-                  ) : null}
-                  {s.txHash ? <a className="link mono step-tx" href={`https://etherscan.io/tx/${s.txHash}`} target="_blank" rel="noopener noreferrer">{s.txHash.slice(0, 10)}…</a> : null}
-                </div>
-                <StepStatus s={s} />
-              </li>
-            ))}
-          </ol>
-          <div className="body">
-            {plan.notes.map((x) => <p className="note" key={x}>{x}</p>)}
-          </div>
+          <div className="panel-head"><h2>ARFC steps</h2><p className="hint">Checked against on-chain changes</p></div>
+          {stages.map((stage) => (
+            <div key={stage}>
+              <p className="stage">{stage}</p>
+              <ol className="steps">
+                {plan.steps.filter((s) => s.stage === stage).map((s, i) => (
+                  <li key={i}>
+                    <div>
+                      <p>{s.label}</p>
+                      {s.note ? <p className="step-note">{s.note}</p> : null}
+                      {s.detail ? <p className="step-note">On-chain: {s.detail}</p> : null}
+                      {s.txHash ? <a className="link mono step-tx" href={`https://etherscan.io/tx/${s.txHash}`} target="_blank" rel="noopener noreferrer">{s.txHash.slice(0, 10)}…</a> : null}
+                    </div>
+                    <StepStatus s={s} plan={plan} />
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+          <div className="body">{plan.notes.map((x) => <p className="note" key={x}>{x}</p>)}</div>
         </div>
       </div>
 
@@ -733,21 +754,22 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
         {c ? (
           <>
             <div className="strip inner">
-              <Cell label={`${plan.symbol} yield, 30 days`} value={pct(c.yieldPct, 2)} sub={`exchange rate growth · plan ${pct(c.planYieldPct, 2)}`} />
-              <Cell label={`${plan.debtSymbol} borrow rate`} value={pct(c.borrowPct, 2)} sub={`30-day average ${pct(c.borrowAvg30Pct, 2)} · plan ${pct(c.planBorrowPct, 2)}`} />
+              <Cell label={`${plan.symbol} yield, 30 days`} value={pct(c.yieldPct, 2)} sub="exchange-rate growth" />
+              <Cell label={`${plan.debtSymbol} borrow rate`} value={pct(c.borrowPct, 2)} sub={`30-day average ${pct(c.borrowAvg30Pct, 2)}`} />
               <Cell label="Spread" value={signed(c.yieldPct != null ? c.yieldPct - c.borrowPct : null, 2)} sub="yield minus borrow rate" />
-              <Cell label={`${plan.debtSymbol} reserve factor`} value={pct(c.reserveFactorPct, 0)} sub="plan: 32% at step 1, 43% at step 2" />
+              <Cell label={`${plan.debtSymbol} reserve factor`} value={pct(c.reserveFactorPct, 0)} sub="rises with the rate path, if used" />
             </div>
             <div className="scroll">
               <table className="stack carry">
                 <thead>
-                  <tr><th>Position</th><th className="r">Leverage</th><th className="r">{plan.debtSymbol} debt</th>{c.roe.map((r) => <th className="r" key={r.bps}>{r.bps ? `ROE at +${r.bps} bps` : "ROE today"}</th>)}<th className="r">Turns negative at</th></tr>
+                  <tr><th>Position</th><th className="r">Leverage</th><th className="r">{plan.debtSymbol} debt</th><th className="r">Moved to {plan.swap.into.join("/")}</th>{c.roe.map((r) => <th className="r" key={r.bps}>{r.bps ? `ROE at +${r.bps} bps` : "ROE today"}</th>)}<th className="r">Turns negative at</th></tr>
                 </thead>
                 <tbody>
                   <tr className="total">
                     <td>All loops</td>
                     <td className="r" data-label="Leverage">{c.avgLeverage ? `${fmt(c.avgLeverage, 1)}x` : DASH}</td>
                     <td className="r" data-label="Debt">{usd(n.debtUsd)}</td>
+                    <td className="r" data-label="Moved">{plan.swap.movedUsd ? usd(plan.swap.movedUsd) : DASH}</td>
                     {c.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
                     <td className="r" data-label="Negative at">{c.breakevenBps != null ? `+${c.breakevenBps} bps` : DASH}</td>
                   </tr>
@@ -756,6 +778,7 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
                       <td className="who">#{p.rank} {p.label ?? short(p.address)}<span className="sub"><Addr address={p.address} /></span></td>
                       <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
                       <td className="r" data-label="Debt">{usd(p.debtUsd)}</td>
+                      <td className={`r ${p.movedUsd > 1000 ? "pos" : ""}`} data-label="Moved">{p.movedUsd > 1000 ? usd(p.movedUsd) : DASH}</td>
                       {p.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
                       <td className="r" data-label="Negative at">{p.breakevenBps != null ? `+${p.breakevenBps} bps` : DASH}</td>
                     </tr>
@@ -763,13 +786,13 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
                 </tbody>
               </table>
             </div>
-            <p className="note pad">Amber: the loop still earns, so the holder has no reason to unwind. Green: the loop loses money and should unwind. Leverage is account-wide, from Aave. Rates are annual, before gas and the cost of unwinding through Kelp’s withdrawal queue.</p>
+            <p className="note pad">Amber: the loop still earns, so the holder has no reason to unwind. Green: it loses money. The +50 and +100 bps columns are the ARFC’s last-resort rate path. “Moved” is wstETH, weETH and cbETH the wallet supplies on Core, the in-place migration the ARFC enables. Leverage is account-wide. Rates are annual, before gas and Kelp’s withdrawal queue.</p>
           </>
         ) : <p className="empty">Rates could not be read from the chain.</p>}
       </div>
 
       <div className="panel">
-        <div className="panel-head"><h2>Parameter changes on-chain</h2><p className="hint">{plan.symbol}, {plan.debtSymbol} and E-Mode changes from the Aave Pool Configurator, since 22 October</p></div>
+        <div className="panel-head"><h2>Parameter changes on-chain</h2><p className="hint">{plan.symbol}, {plan.debtSymbol}, {plan.swap.into.join(", ")} and E-Mode changes from the Aave Pool Configurator, since 22 October</p></div>
         {plan.changes.length ? (
           <ul className="changes">
             {plan.changes.map((ch) => (
@@ -780,7 +803,7 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
               </li>
             ))}
           </ul>
-        ) : <p className="empty">No change since 22 October. The first rate step will appear here, and the plan step above will tick, the moment it executes.</p>}
+        ) : <p className="empty">No change since 22 October. The ARFC’s AIP will appear here, and its steps above will tick, the moment it executes.</p>}
       </div>
 
       {plan.warnings.length ? <div className="panel"><div className="body">{plan.warnings.map((w) => <p className="note warn" key={w}>{w}</p>)}</div></div> : null}
@@ -815,6 +838,9 @@ const SOURCES: [string, string][] = [
   ["Team tags and notes", "The repository (data/*.json)"],
   ["Tags added on the site", "Shared storage (Upstash)"],
   ["Offboarding: daily debt history, collateral yield, borrow rate", "Ethereum RPC (past balances and oracle prices, Pool reserve data)"],
+  ["Market: exchange rate, backing, deposits paused", "Ethereum RPC: Kelp's oracle and deposit pool, rsETH supply"],
+  ["Market: market price and peg", "CoinGecko (every 10 minutes)"],
+  ["Market: risk findings and incidents", "config/risk.ts, quoted from LlamaRisk and press, with links"],
   ["Offboarding: plan steps and parameter changes", "Ethereum RPC: Aave Pool Configurator events; plan figures from config/plan.ts"],
 ];
 
@@ -904,7 +930,8 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
         if (!m) return <div className="panel" key={a.symbol}><p className="empty">{busy ? `Reading the ${a.symbol} market…` : `No data for ${a.symbol}.`}</p></div>;
         const status = m.paused ? "Paused" : m.frozen ? "Frozen" : m.active ? "Active" : "Inactive";
         return (
-          <div className="panel" key={a.symbol}>
+          <Fragment key={a.symbol}>
+          <div className="panel">
             <div className="panel-head">
               <div className="asset-name">
                 <AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />
@@ -944,11 +971,106 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
               {m.notes.map((n) => <p className="note warn" key={n}>{n}</p>)}
             </div>
           </div>
+          <RiskPanel asset={a} />
+          </Fragment>
         );
       })}
       <p className="note">
         Values use the Aave oracle price at the time of reading. Debt against the market is what the tracked holders borrow in the loop’s debt asset; smaller holders are not included.
       </p>
+    </>
+  );
+}
+
+// ── Market: issuer risk ─────────────────────────────────────────────────────
+
+const BACKING_COLORS = ["#2468fc", "#00c880", "#f2c200", "#8b5cf6", "#06b6d4"];
+
+function RiskPanel({ asset }: { asset: Shown[number] }) {
+  const [risk, setRisk] = useState<RiskResponse | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => getJson<{ risk: RiskResponse | null }>(`/api/risk?asset=${asset.symbol}`).then((r) => live && (setRisk(r.risk), setError(null))).catch((e) => live && setError(e instanceof Error ? e.message : "Failed"));
+    load();
+    const id = window.setInterval(() => document.visibilityState === "visible" && load(), 10 * 60_000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [asset.symbol]);
+
+  if (risk === null) return null;
+  if (error) return <div className="panel"><p className="empty">Could not read {asset.symbol}’s peg and backing: {error}</p></div>;
+  if (!risk) return <div className="panel"><p className="empty">Reading {asset.symbol}’s peg and backing…</p></div>;
+
+  const peg = risk.market?.pegPct ?? null;
+  const pegTone = peg == null ? "" : Math.abs(peg) < 0.5 ? "pos" : Math.abs(peg) < 2 ? "warn" : "bad";
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Issuer · {risk.issuer}</p>
+            <h2>{risk.symbol}: peg, backing and risk</h2>
+          </div>
+          <p className="hint">Read {when(risk.readAt)} · refreshed every 10 minutes</p>
+        </div>
+        <div className="strip inner">
+          <Cell label="Market price vs exchange rate" value={signed(peg, 2)} tone={pegTone} sub={risk.market ? `${fmt(risk.market.priceEth, 4)} ETH on ${risk.market.source} · rate ${fmt(risk.exchangeRate, 4)}` : "market price unavailable"} />
+          <Cell label="Exchange rate" value={`${fmt(risk.exchangeRate, 4)} ETH`} sub={`${risk.rateSource}${risk.rateSource === "Kelp oracle" ? ` · Aave uses ${fmt(risk.aaveRate, 4)}` : ""}`} />
+          <Cell label={`${risk.symbol} supply on Ethereum`} value={fmt(risk.supply)} sub={risk.market ? usd(risk.supply * risk.market.priceUsd) : undefined} />
+          <Cell label="Held on Aave V3 Core" value={pct(risk.onAavePct)} tone={risk.onAavePct && risk.onAavePct > 50 ? "warn" : ""} sub={`${fmt(risk.onAave)} ${risk.symbol}`} />
+          <Cell label="Kelp deposits" value={risk.depositsPaused == null ? DASH : risk.depositsPaused ? "Paused" : "Open"} tone={risk.depositsPaused ? "warn" : ""} sub="deposit pool" />
+          <Cell label="Market price, 24 h" value={signed(risk.market?.change24hPct, 2)} sub="in ETH" />
+        </div>
+        <div className="risk-grid">
+          <div className="body">
+            <p className="k">Backing{risk.backedEth ? ` · ${fmt(risk.backedEth)} ETH in Kelp’s deposit pool` : ""}</p>
+            {risk.backing.some((b) => b.sharePct != null) ? (
+              <>
+                <div className="stack-bar" role="img" aria-label="Backing by asset">
+                  {risk.backing.map((b, i) => b.sharePct ? <div key={b.symbol} style={{ width: `${b.sharePct}%`, background: BACKING_COLORS[i % BACKING_COLORS.length] }} title={`${b.symbol} ${pct(b.sharePct)}`} /> : null)}
+                </div>
+                {risk.backing.map((b, i) => (
+                  <div className="kv" key={b.symbol}>
+                    <span><i className="sw" style={{ background: BACKING_COLORS[i % BACKING_COLORS.length] }} />{b.symbol}</span>
+                    <span>{b.tokens != null ? `${fmt(b.tokens)} ${b.symbol}` : DASH}{b.eth != null && b.symbol !== "ETH" ? ` · ${fmt(b.eth)} ETH` : ""} · {pct(b.sharePct)}</span>
+                  </div>
+                ))}
+                <p className="note">Kelp’s own accounting: stETH counts at 1 ETH, so a stETH discount does not lower the rsETH rate.</p>
+              </>
+            ) : <p className="note">Kelp’s deposit pool did not answer.</p>}
+          </div>
+          <div className="body">
+            <p className="k">Exit liquidity</p>
+            <p className="plain">{risk.exit.text}</p>
+            <p className="note">{risk.exit.source}</p>
+          </div>
+        </div>
+        {risk.warnings.map((w) => <p className="note warn pad" key={w}>{w}</p>)}
+      </div>
+
+      <div className="two">
+        <div className="panel">
+          <div className="panel-head"><h2>Risk findings</h2><p className="hint">{risk.findingsSource.label}, {risk.findingsSource.date}</p></div>
+          <ul className="findings">
+            {risk.findings.map((f) => <li key={f.area}><span className="area">{f.area}</span><p>{f.text}</p></li>)}
+          </ul>
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>Incidents</h2><p className="hint">Exploits and governance events</p></div>
+          <ol className="incidents">
+            {risk.incidents.map((x) => (
+              <li key={x.date + x.title}>
+                <span className="when">{dayLabel(x.date)} {x.date.slice(0, 4)}</span>
+                <div>
+                  <p className="title">{x.title}</p>
+                  <p>{x.text}</p>
+                  {x.links.length ? <p className="links-inline">{x.links.map((l) => <a key={l.url} className="link" href={l.url} target="_blank" rel="noopener noreferrer">{l.label} ↗</a>)}</p> : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
     </>
   );
 }

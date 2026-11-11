@@ -10,64 +10,59 @@
 import type { Address } from "./assets";
 
 export interface PlanStep {
-  month: number;
+  stage: string;          // "Initial measures", "Natural unwinding", "Follow-up, last resort"
   label: string;
-  /** Marked done when this on-chain change is seen. */
-  detect?: { asset: "debt" | "collateral"; reserveFactorAtLeastPct?: number; frozen?: boolean };
-  /** Only happens if this holds (shown as a rule, evaluated on the tab). */
-  condition?: "loop-debt-fell-less-than-25pct";
-}
-
-export interface PlanTrigger {
-  label: string;          // what happens
-  rule: string;           // in words
-  debtBelowUsd: number;   // fires when the debt backed by the asset falls below this
+  /** Marked done when this is seen on-chain. */
+  detect?:
+    | { kind: "frozen" }
+    | { kind: "emodeCollateralAdded"; category: number; assets: string[] }
+    | { kind: "debtRateChange" };
+  note?: string;
 }
 
 export interface AssetPlan {
   resolution: string;
-  path: "rate" | "lt";
   pathLabel: string;
-  /** Plan figures, 2 November 2026. */
-  baseline: { date: string; collateralUsd: number; debtUsd: number };
+  /** Plan figures at the baseline date. */
+  baseline: { date: string; collateralUsd: number; debtUsd: number; revenueUsd: number };
   /** E-Mode categories the loops sit in. */
   eModes: number[];
-  /** Plan's own carry figures, for reference next to the live ones. */
-  planCarry: { yieldPct: number; borrowPct: number; breakevenBps: number; roeAt100BpsPct: number };
+  /** Collateral that stays on Core and that loops can swap into within their E-Mode. */
+  swapInto: { symbol: string; address: Address }[];
   steps: PlanStep[];
-  triggers: PlanTrigger[];
   notes: string[];
 }
 
 export const PLAN = {
-  title: "Collateral Restructuring: Aave V3 Core",
-  source: "LlamaRisk, 2 November 2026",
-  /** First block read for parameter changes: 22 October 2026, ten days before the plan's figures. */
+  title: "ARFC: Repositioning Aave V3 Core around Established, Liquid Collateral",
+  url: "https://governance.aave.com/t/arfc-repositioning-aave-v3-core-around-established-liquid-collateral/26191",
+  source: "LlamaRisk, 9 November 2026",
+  /** First block read for parameter changes: 22 October 2026. */
   timelineFromBlock: 26_250_000,
   configurator: "0x64b761D848206f447Fe2dd461b0c635Ec39EbB27" as Address,
-  /** WETH rate steps on the rate path, in basis points over the current curve. */
+  /** WETH rate steps the ARFC allows as the last resort, in basis points over the current curve. */
   rateSteps: [0, 50, 100],
 };
 
 export const ASSET_PLANS: Record<string, AssetPlan> = {
   rsETH: {
     resolution: "Offboard",
-    path: "rate",
-    pathLabel: "Rate path",
-    baseline: { date: "2026-11-02", collateralUsd: 739.3e6, debtUsd: 676.5e6 },
+    pathLabel: "Freeze, migrate, rate path last",
+    baseline: { date: "2026-11-09", collateralUsd: 661.8e6, debtUsd: 605.7e6, revenueUsd: 1.85e6 },
     eModes: [3],
-    planCarry: { yieldPct: 2.57, borrowPct: 1.97, breakevenBps: 85, roeAt100BpsPct: -1.8 },
-    steps: [
-      { month: 0, label: "rsETH frozen, LTV 0 (since 18 April)", detect: { asset: "collateral", frozen: true } },
-      { month: 0, label: "WETH borrow rate +50 bps, reserve factor 15% → 32%, Merkl rebates for bluechip WETH borrowers", detect: { asset: "debt", reserveFactorAtLeastPct: 32 } },
-      { month: 1, label: "WETH borrow rate +100 bps, reserve factor 43%", detect: { asset: "debt", reserveFactorAtLeastPct: 43 }, condition: "loop-debt-fell-less-than-25pct" },
-      { month: 2, label: "Hold, then reassess: E-Mode exit, rate and reserve factor back to 15%, end of Merkl campaign" },
+    swapInto: [
+      { symbol: "wstETH", address: "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0" },
+      { symbol: "weETH", address: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee" },
+      { symbol: "cbETH", address: "0xBe9895146f7AF43049ca1c1AE358B0541Ea49704" },
     ],
-    triggers: [
-      { label: "E-Mode 3 LT cuts start", rule: "rsETH-backed WETH debt below $50M", debtBelowUsd: 50e6 },
+    steps: [
+      { stage: "Initial measures", label: "rsETH frozen, LTV 0 (since April)", detect: { kind: "frozen" } },
+      { stage: "Initial measures", label: "wstETH, weETH and cbETH added as collateral to the rsETH E-Mode (93% LTV, 95% LT), so loops can swap collateral instead of repaying", detect: { kind: "emodeCollateralAdded", category: 3, assets: ["wstETH", "weETH", "cbETH"] } },
+      { stage: "Natural unwinding", label: "Issuer and largest borrowers engaged on migration to wstETH, weETH, cbETH or V4; progress reported monthly", note: "No further measure while exposure declines." },
+      { stage: "Follow-up, last resort", label: "WETH base borrow rate up to +100 bps in 50 bps steps, at most monthly, with a reserve factor rise holding the supply rate and Merkl rebates for WETH borrowers without rsETH or osETH", detect: { kind: "debtRateChange" }, note: "Only if migration has not reduced the exposure; announced on the forum first." },
     ],
     notes: [
-      "The three largest positions back 67% of the WETH debt and are to be approached about moving their loops to wstETH, weETH or cbETH.",
+      "The remaining debt sits in eleven positions above $0.2M; the three largest hold 69% of it.",
       "rsETH unwinds through Kelp's 15 to 21 day withdrawal queue: rsETH sent to the withdrawal manager shows in Last tx.",
     ],
   },

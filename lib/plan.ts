@@ -142,13 +142,13 @@ const EMODE_TOPIC = toEventSelector("event EModeCategoryAdded(uint8,uint256,uint
 
 async function changes(r: Reserve, plan: AssetPlan): Promise<PlanChange[]> {
   const head = await client().getBlockNumber();
-  const key = `changes:${r.symbol}`;
+  const key = `changes:v2:${r.symbol}`;
   const saved = (await load<{ lastBlock: number; items: PlanChange[] }>(key)) ?? { lastBlock: PLAN.timelineFromBlock - 1, items: [] };
   const from = BigInt(saved.lastBlock + 1);
   if (from > head) return saved.items;
-  const names = new Map([[r.underlying.toLowerCase(), r.symbol], [r.debtUnderlying.toLowerCase(), r.debtSymbol]]);
+  const names = new Map([[r.underlying.toLowerCase(), r.symbol], [r.debtUnderlying.toLowerCase(), r.debtSymbol], ...plan.swapInto.map((s) => [s.address.toLowerCase(), s.symbol] as [string, string])]);
   const [assetLogs, emodeLogs] = await Promise.all([
-    logsSplit(PLAN.configurator, [ASSET_TOPICS, [padTopic(r.underlying), padTopic(r.debtUnderlying)]], from, head),
+    logsSplit(PLAN.configurator, [ASSET_TOPICS, [r.underlying, r.debtUnderlying, ...plan.swapInto.map((s) => s.address)].map(padTopic)], from, head),
     plan.eModes.length ? logsSplit(PLAN.configurator, [EMODE_TOPIC, plan.eModes.map((n) => padTopic(`0x${n.toString(16)}`))], from, head) : Promise.resolve([]),
   ]);
   const fresh: PlanChange[] = [];
@@ -175,6 +175,27 @@ async function changes(r: Reserve, plan: AssetPlan): Promise<PlanChange[]> {
   return items;
 }
 
+// ── collateral swapped within the E-Mode ──────────────────────────────────────
+
+/** wstETH, weETH and cbETH supplied by each loop wallet, in USD: what has moved within the E-Mode. */
+async function swapped(plan: AssetPlan, wallets: Address[]): Promise<Map<string, number>> {
+  const c = client();
+  const out = new Map<string, number>();
+  if (!wallets.length || !plan.swapInto.length) return out;
+  const reserves = await Promise.all(plan.swapInto.map(async (s) => {
+    const [d, price] = await Promise.all([
+      c.readContract({ address: AAVE_V3_CORE.pool, abi: poolAbi, functionName: "getReserveData", args: [s.address] }),
+      c.readContract({ address: AAVE_V3_CORE.oracle, abi: oracleAbi, functionName: "getAssetPrice", args: [s.address] }),
+    ]);
+    return { aToken: d.aTokenAddress as Address, price: Number(formatUnits(price, 8)) };
+  }));
+  await Promise.all(wallets.map(async (w) => {
+    const bals = await Promise.all(reserves.map((x) => c.readContract({ address: x.aToken, abi: erc20, functionName: "balanceOf", args: [w] })));
+    out.set(w.toLowerCase(), bals.reduce((s, b, i) => s + Number(formatUnits(b, 18)) * reserves[i].price, 0));
+  }));
+  return out;
+}
+
 // ── the tab ───────────────────────────────────────────────────────────────────
 
 export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse | null> {
@@ -185,9 +206,10 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
     const holders = loops.positions.filter((p) => p.loops).map((p) => p.address);
     const notes: string[] = [];
     const days = await history(r, holders, plan).catch((e) => { notes.push(`History unavailable: ${e instanceof Error ? e.message : "failed"}`); return [] as PlanDay[]; });
-    const [carryNow, changeList] = await Promise.all([
+    const [carryNow, changeList, moved] = await Promise.all([
       carry(r, days.slice(-31)).catch((e) => { notes.push(`Carry unavailable: ${e instanceof Error ? e.message : "failed"}`); return null; }),
       changes(r, plan).catch((e) => { notes.push(`Parameter history unavailable: ${e instanceof Error ? e.message : "failed"}`); return [] as PlanChange[]; }),
+      swapped(plan, holders).catch(() => new Map<string, number>()),
     ]);
 
     const loopers = loops.positions.filter((p) => p.loops);
@@ -203,44 +225,53 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
     const avgLev = eq > 0 ? coll / eq : null;
 
     // Step status, from the parameter changes
-    const debtRf = changeList.filter((c) => c.kind === "ReserveFactorChanged" && c.asset === r.debtSymbol);
     const frozen = changeList.find((c) => c.kind === "ReserveFrozen" && c.asset === r.symbol && c.values[0] === true);
     const steps = plan.steps.map((s) => {
-      let doneAt: string | null = null, txHash: string | null = null;
-      if (s.detect?.frozen && frozen) { doneAt = frozen.timestamp; txHash = frozen.txHash; }
-      else if (s.detect?.frozen && loops.market.frozen) doneAt = "before tracking";
-      if (s.detect?.reserveFactorAtLeastPct) {
-        const hit = [...debtRf].reverse().find((c) => Number(c.values[1]) >= s.detect!.reserveFactorAtLeastPct! * 100);
-        if (hit) { doneAt = hit.timestamp; txHash = hit.txHash; }
+      let doneAt: string | null = null, txHash: string | null = null, detail: string | null = null;
+      const d = s.detect;
+      if (d?.kind === "frozen") {
+        if (frozen) { doneAt = frozen.timestamp; txHash = frozen.txHash; } else if (loops.market.frozen) doneAt = "before tracking";
       }
-      if (!doneAt && s.detect?.reserveFactorAtLeastPct && carryNow && carryNow.reserveFactorPct >= s.detect.reserveFactorAtLeastPct) doneAt = "before tracking";
-      return { month: s.month, label: s.label, condition: s.condition ?? null, doneAt, txHash };
+      if (d?.kind === "emodeCollateralAdded") {
+        const hits = changeList.filter((c) => c.kind === "AssetCollateralInEModeChanged" && d.assets.includes(c.asset) && Number(c.values[0]) === d.category && c.values[1] === true);
+        const added = [...new Set(hits.map((h) => h.asset))];
+        if (added.length === d.assets.length) { const last = hits[0]; doneAt = last.timestamp; txHash = last.txHash; }
+        else if (added.length) detail = `${added.join(", ")} added so far`;
+      }
+      if (d?.kind === "debtRateChange") {
+        const hit = changeList.find((c) => c.asset === r.debtSymbol && (c.kind === "ReserveInterestRateDataChanged" || c.kind === "ReserveInterestRateStrategyChanged" || c.kind === "ReserveFactorChanged"));
+        if (hit) { doneAt = hit.timestamp; txHash = hit.txHash; detail = hit.text; }
+      }
+      return { stage: s.stage, label: s.label, note: s.note ?? null, detail, doneAt, txHash, tracked: !!d };
     });
 
-    // Month-1 rule: measured from the day step 0 (the first rate step) executed
-    const rateStep0 = steps.find((s) => s.month === 0 && plan.steps.find((p) => p.label === s.label)?.detect?.reserveFactorAtLeastPct);
-    let monthRule: PlanResponse["monthRule"] = null;
-    if (rateStep0?.doneAt && rateStep0.doneAt !== "before tracking") {
-      const startDay = rateStep0.doneAt.slice(0, 10);
-      const start = days.find((d) => d.date >= startDay) ?? null;
-      const due = new Date(Date.parse(rateStep0.doneAt) + 30 * DAY * 1000).toISOString();
-      const fellPct = start && start.debt > 0 ? (1 - debtNow / start.debt) * 100 : null;
-      monthRule = { startedAt: rateStep0.doneAt, due, startDebt: start?.debt ?? null, fellPct, secondStepNeeded: fellPct == null ? null : fellPct < 25 };
-    }
+    // Is exposure declining? The ARFC applies no further measure while it is.
+    const ago = (n: number) => days[Math.max(0, days.length - 1 - n)] ?? null;
+    const d7 = ago(7), d30 = ago(30);
+    const chg = (from: PlanDay | null) => (from && from.debt > 0 ? (debtNow / from.debt - 1) * 100 : null);
+    const change7 = chg(d7), change30 = chg(d30);
+    const trend: PlanResponse["trend"] = {
+      change7Pct: change7, change30Pct: change30,
+      declining: change30 == null ? null : change30 <= -1,
+      perWeekTokens: d7 ? (d7.debt - debtNow) : null,
+    };
+
+    const movedUsd = [...moved.values()].reduce((s, v) => s + v, 0);
+    const rsethCollUsd = loopers.reduce((s, p) => s + p.suppliedUsd, 0);
 
     const res: PlanResponse = {
       symbol: asset.symbol, debtSymbol: r.debtSymbol, title: PLAN.title, source: PLAN.source,
-      resolution: plan.resolution, path: plan.path, pathLabel: plan.pathLabel, notes: [...plan.notes], warnings: notes,
+      url: PLAN.url, resolution: plan.resolution, pathLabel: plan.pathLabel, notes: [...plan.notes], warnings: notes,
       baseline: { ...plan.baseline, debtTokens: base?.debt ?? null, supplied: base?.supplied ?? null, block: base?.block ?? null },
       now: { debt: debtNow, debtUsd: debtUsdNow, supplied: loops.market.suppliedTokens, positions: loopers.length, asOf: loops.asOf },
       history: days,
-      triggers: plan.triggers.map((t) => ({ ...t, met: debtUsdNow < t.debtBelowUsd })),
-      steps, monthRule,
+      steps, trend,
+      swap: { into: plan.swapInto.map((s) => s.symbol), movedUsd, rsethCollUsd, sharePct: movedUsd + rsethCollUsd > 0 ? (movedUsd / (movedUsd + rsethCollUsd)) * 100 : null },
       carry: carryNow ? {
-        ...carryNow, planYieldPct: plan.planCarry.yieldPct, planBorrowPct: plan.planCarry.borrowPct, planBreakevenBps: plan.planCarry.breakevenBps,
+        ...carryNow,
         avgLeverage: avgLev, roe: PLAN.rateSteps.map((bps) => ({ bps, pct: avgLev ? roe(avgLev, bps) : null })), breakevenBps: avgLev ? breakeven(avgLev) : null,
         positions: loopers.map((p) => ({
-          address: p.address, rank: p.rank, label: p.tag?.label ?? null, leverage: p.leverage, debtUsd: p.debtUsd,
+          address: p.address, rank: p.rank, label: p.tag?.label ?? null, leverage: p.leverage, debtUsd: p.debtUsd, movedUsd: moved.get(p.address.toLowerCase()) ?? 0, rsethUsd: p.suppliedUsd,
           roe: PLAN.rateSteps.map((bps) => ({ bps, pct: p.leverage ? roe(p.leverage, bps) : null })), breakevenBps: p.leverage ? breakeven(p.leverage) : null,
         })),
       } : null,
