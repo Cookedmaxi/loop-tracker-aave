@@ -364,3 +364,9 @@ table.report-table th { color: var(--muted); font-weight: 500; }
   .master-list .positions-scroll { max-height: 60vh; flex: none; }
   .master-detail { overflow: visible; }
 }
+
+/* "All assets": every logo, overlapping */
+.logo-stack { display: inline-flex; align-items: center; }
+.logo-stack > span { position: relative; display: block; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg); }
+.logo-stack > span + span { margin-left: -4px; }
+.logo-stack .logo { width: 18px; height: 18px; object-fit: cover; }

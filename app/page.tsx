@@ -55,6 +55,15 @@ function AssetLogo({ symbol, src }: { symbol: string; src?: string }) {
   return <img className="logo" src={src} alt="" onError={() => setBroken(true)} />;
 }
 
+/** Every asset's logo, overlapping: the "All assets" mark. */
+function AssetStack({ assets }: { assets: { symbol: string; logo: string }[] }) {
+  return (
+    <span className="logo-stack" aria-hidden="true">
+      {assets.map((a, i) => <span key={a.symbol} style={{ zIndex: assets.length - i }}><AssetLogo symbol={a.symbol} src={a.logo} /></span>)}
+    </span>
+  );
+}
+
 function EntityTag({ entity, colors, community }: { entity: string | null | undefined; colors: Map<string, string>; community?: boolean }) {
   if (!entity) return <span className="muted">{DASH}</span>;
   return (
@@ -273,7 +282,7 @@ export default function Page() {
         <div className="tools">
           {assets.length ? (
             <label className="asset-pick">
-              <AssetLogo symbol={shown.length === 1 ? shown[0].symbol : "All"} src={shown.length === 1 ? shown[0].logo : undefined} />
+              {shown.length === 1 ? <AssetLogo symbol={shown[0].symbol} src={shown[0].logo} /> : <AssetStack assets={assets} />}
               <span className="sr">Asset</span>
               <select aria-label="Asset" value={picked.length === 1 ? picked[0] : assets.length === 1 ? assets[0].symbol : ""} onChange={(e) => { setPicked(e.target.value ? [e.target.value] : []); setSel(null); }}>
                 {assets.length > 1 ? <option value="">All assets</option> : null}
