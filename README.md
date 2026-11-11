@@ -1,4 +1,4 @@
-# TokenLogic · Loop Monitor
+# TokenLogic · Loop Tracker
 
 Tracks leveraged loop positions on Aave V3 Core. Every figure is read on-chain when the page is opened or when **Refresh** is pressed.
 

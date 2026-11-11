@@ -90,3 +90,16 @@ export interface HolderDetail {
 }
 
 export interface Entity { entity: string; kind: string; approach: string; status: string; website: string; x: string }
+
+/** A link between a holder and an entity, added on the site by someone on the team. */
+export interface CommunityTag {
+  id: string;
+  address: Address;
+  entity: string;
+  label: string | null;
+  confidence: "Confirmed" | "Probable" | "Possible";
+  reasoning: string;
+  links: string[];
+  author: string;
+  createdAt: string;
+}

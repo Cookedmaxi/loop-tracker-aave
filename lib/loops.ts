@@ -3,7 +3,8 @@
 import { AAVE_V3_CORE, ASSETS, HF_ALERT, TOP_HOLDERS, type Address, type LoopAsset } from "@/config/assets";
 import { cached } from "./cache";
 import { getAddressTransfers, getHolderCount, getTokenTransfers, getTopHolders, isZero, type RawTransfer } from "./blockscout";
-import { readMarket, readPositions, resolveReserve, type Reserve } from "./chain";
+import { resolveReserve, type Reserve } from "./chain";
+import { aaveSource } from "./aave";
 import { tagOf } from "./tags";
 import type { LoopsResponse, Market, Position, Tx } from "./types";
 
@@ -19,9 +20,9 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
     const [holders, holderCount, m] = await Promise.all([
       getTopHolders(reserve.aToken, TOP_HOLDERS),
       getHolderCount(reserve.aToken).catch(() => null),
-      readMarket(reserve),
+      aaveSource().readMarket(reserve),
     ]);
-    const chain = await readPositions(reserve, holders.map((h) => h.address));
+    const chain = await aaveSource().readPositions(reserve, holders.map((h) => h.address));
     const rate = m.debtPriceUsd ? m.priceUsd / m.debtPriceUsd : 0;
 
     const positions: Position[] = chain.map((p, i) => {

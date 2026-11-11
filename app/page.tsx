@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Entity, HolderDetail, LoopsResponse, Market, Position, Tag, Tx } from "@/lib/types";
+import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, Position, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -42,8 +42,6 @@ const EXPLORERS: [string, (a: string) => string][] = [
   ["Etherscan", (a) => `https://etherscan.io/address/${a}`],
   ["DeBank", (a) => `https://debank.com/profile/${a}`],
   ["Arkham", (a) => `https://intel.arkm.com/explorer/address/${a}`],
-  ["OpenSea", (a) => `https://opensea.io/${a}`],
-  ["Blockscout", (a) => `https://eth.blockscout.com/address/${a}`],
 ];
 
 // ── small components ────────────────────────────────────────────────────────
@@ -55,10 +53,10 @@ function AssetLogo({ symbol, src }: { symbol: string; src?: string }) {
   return <img className="logo" src={src} alt="" onError={() => setBroken(true)} />;
 }
 
-function EntityTag({ entity, colors }: { entity: string | null | undefined; colors: Map<string, string> }) {
+function EntityTag({ entity, colors, community }: { entity: string | null | undefined; colors: Map<string, string>; community?: boolean }) {
   if (!entity) return <span className="muted">{DASH}</span>;
   return (
-    <span className="tag">
+    <span className={`tag ${community ? "community" : ""}`} title={community ? "Tagged by the team on the site, not yet in data/tags.json" : undefined}>
       <i className="dot" style={{ background: colors.get(entity) ?? "var(--muted)" }} aria-hidden="true" />
       {entity}
     </span>
@@ -96,7 +94,7 @@ const holderName = (p: Position) => p.tag?.label ?? p.ens ?? p.contractName ?? (
 function TxTable({ rows, colors, showWallet }: { rows: Tx[]; colors: Map<string, string>; showWallet: boolean }) {
   return (
     <div className="scroll">
-      <table>
+      <table className="stack txs">
         <thead>
           <tr>
             <th>Time</th>
@@ -112,22 +110,22 @@ function TxTable({ rows, colors, showWallet }: { rows: Tx[]; colors: Map<string,
         <tbody>
           {rows.map((t) => (
             <tr key={t.id}>
-              <td className="nw">{when(t.timestamp)}</td>
+              <td className="nw time">{when(t.timestamp)}</td>
               {showWallet ? (
-                <td>
+                <td className="who">
                   {t.walletRank ? `#${t.walletRank} ` : ""}{t.walletTag?.label ?? ""}
                   <span className="sub"><Addr address={t.wallet} /></span>
                 </td>
               ) : null}
-              <td className="nw">{t.action}</td>
-              <td className="r">{fmtAmount(t.amount)}</td>
-              <td className="nw">{t.tokenSymbol || short(t.tokenAddress)}</td>
-              <td>
+              <td className="nw" data-label="Type">{t.action}</td>
+              <td className="r" data-label="Amount">{fmtAmount(t.amount)}</td>
+              <td className="nw" data-label="Token">{t.tokenSymbol || short(t.tokenAddress)}</td>
+              <td data-label="Counterparty">
                 {t.counterpartyTag?.label ?? ""}
                 <span className={t.counterpartyTag ? "sub" : ""}><Addr address={t.counterparty} /></span>
               </td>
-              <td><EntityTag entity={t.counterpartyTag?.entity} colors={colors} /></td>
-              <td><a className="link mono" href={`https://etherscan.io/tx/${t.txHash}`} target="_blank" rel="noopener noreferrer">{t.txHash.slice(0, 10)}…</a></td>
+              <td data-label="Tag"><EntityTag entity={t.counterpartyTag?.entity} colors={colors} /></td>
+              <td data-label="Tx"><a className="link mono" href={`https://etherscan.io/tx/${t.txHash}`} target="_blank" rel="noopener noreferrer">{t.txHash.slice(0, 10)}…</a></td>
             </tr>
           ))}
         </tbody>
@@ -150,6 +148,11 @@ export default function Page() {
   const [tx, setTx] = useState<Record<string, Tx[]>>({});
   const [txBusy, setTxBusy] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
+  const [community, setCommunity] = useState<CommunityTag[]>([]);
+  const [communityError, setCommunityError] = useState<string | null>(null);
+  const loadCommunity = useCallback(() => {
+    getJson<{ tags: CommunityTag[] }>("/api/community-tags").then((r) => { setCommunity(r.tags); setCommunityError(null); }).catch((e) => setCommunityError(e.message));
+  }, []);
 
   const assets = useMemo(() => meta?.assets ?? [], [meta]);
   const shown = useMemo(() => (picked.length ? assets.filter((a) => picked.includes(a.symbol)) : assets), [assets, picked]);
@@ -158,9 +161,16 @@ export default function Page() {
 
   const colors = useMemo(() => {
     const map = new Map<string, string>();
-    (registry?.entities ?? []).filter((e) => !/^unknown/i.test(e.entity)).forEach((e, i) => map.set(e.entity, BRAND[i % BRAND.length]));
+    const names = [...(registry?.entities ?? []).map((e) => e.entity), ...community.map((t) => t.entity)];
+    Array.from(new Set(names)).filter((e) => !/^unknown/i.test(e)).forEach((e, i) => map.set(e, BRAND[i % BRAND.length]));
     return map;
-  }, [registry]);
+  }, [registry, community]);
+  /** Newest community tag per address, used where the team has no tag yet. */
+  const communityOf = useMemo(() => {
+    const m = new Map<string, CommunityTag>();
+    for (const t of community) if (!m.has(t.address.toLowerCase())) m.set(t.address.toLowerCase(), t);
+    return m;
+  }, [community]);
 
   // Reads positions and market figures from the chain for every asset.
   const loadLoops = useCallback(async (list: Meta["assets"], fresh: boolean) => {
@@ -194,7 +204,8 @@ export default function Page() {
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
     getJson<Meta>("/api/assets").then((m) => { setMeta(m); loadLoops(m.assets, false); }).catch((e) => setErrors({ site: e.message }));
     getJson<RegistryData>("/api/registry").then(setRegistry).catch(() => setRegistry({ entities: [], tags: [] }));
-  }, [loadLoops]);
+    loadCommunity();
+  }, [loadLoops, loadCommunity]);
 
   const needsTx = tab === "tx" || tab === "entities";
   const txLoaded = shown.length > 0 && shown.every((a) => tx[`${a.symbol}:market`] && tx[`${a.symbol}:holders`]);
@@ -207,11 +218,6 @@ export default function Page() {
     if (needsTx || Object.keys(tx).length) loadTx(shown, true);
   };
   const openTab = (id: TabId) => { setTab(id); window.history.replaceState(null, "", `#${id}`); };
-  const toggleAsset = (symbol: string) => {
-    const base = picked.length ? picked : [];
-    const next = base.includes(symbol) ? base.filter((s) => s !== symbol) : [...base, symbol];
-    setPicked(next.length === assets.length ? [] : next);
-  };
 
   const positions = useMemo(() => shown.flatMap((a) => (loops[a.symbol]?.positions ?? []).map((p) => ({ asset: a.symbol, p }))), [shown, loops]);
   const current = positions.find((x) => sel && x.asset === sel.asset && x.p.address === sel.address) ?? positions[0] ?? null;
@@ -224,7 +230,7 @@ export default function Page() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/tokenlogic.png" alt="TokenLogic" />
           <span className="slash">/</span>
-          <span>Loops</span>
+          <span>Loop Tracker</span>
         </div>
         <nav className="nav" role="tablist" aria-label="Sections">
           {TABS.map((t) => (
@@ -232,14 +238,16 @@ export default function Page() {
           ))}
         </nav>
         <div className="tools">
-          {assets.length > 1 ? (
-            <button className="chip plain" aria-pressed={picked.length === 0} onClick={() => setPicked([])}>All assets</button>
+          {assets.length ? (
+            <label className="asset-pick">
+              <AssetLogo symbol={shown.length === 1 ? shown[0].symbol : "All"} src={shown.length === 1 ? shown[0].logo : undefined} />
+              <span className="sr">Asset</span>
+              <select aria-label="Asset" value={picked.length === 1 ? picked[0] : assets.length === 1 ? assets[0].symbol : ""} onChange={(e) => { setPicked(e.target.value ? [e.target.value] : []); setSel(null); }}>
+                {assets.length > 1 ? <option value="">All assets</option> : null}
+                {assets.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
+              </select>
+            </label>
           ) : null}
-          {assets.map((a) => (
-            <button key={a.symbol} className="chip" aria-pressed={assets.length === 1 || picked.includes(a.symbol)} onClick={() => toggleAsset(a.symbol)}>
-              <AssetLogo symbol={a.symbol} src={a.logo} />{a.symbol}
-            </button>
-          ))}
           <button className="chip plain" onClick={refresh} disabled={busy || txBusy}>
             <span className={busy || txBusy ? "spin" : ""} aria-hidden="true">↻</span> {busy || txBusy ? "Reading chain" : "Refresh"}
           </button>
@@ -254,7 +262,7 @@ export default function Page() {
         {!meta && !errors.site ? <p className="empty">Loading…</p> : null}
 
         {tab === "loops" ? (
-          <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf}
+          <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community}
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
         {tab === "market" ? <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} /> : null}
@@ -262,7 +270,8 @@ export default function Page() {
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
         ) : null}
         {tab === "entities" ? (
-          <EntitiesTab registry={registry} positions={positions} shown={shown} tx={tx} txBusy={txBusy} colors={colors} />
+          <EntitiesTab registry={registry} positions={positions} shown={shown} tx={tx} txBusy={txBusy} colors={colors}
+            community={community} communityError={communityError} onCommunityChange={loadCommunity} />
         ) : null}
       </main>
     </>
@@ -277,8 +286,9 @@ type Row = { asset: string; p: Position };
 function LoopsTab(props: {
   shown: Shown; loops: Record<string, LoopsResponse>; busy: boolean; positions: Row[]; current: Row | null; hfAlert: number;
   colors: Map<string, string>; logoOf: (s: string) => string | undefined; onPick: (asset: string, address: string) => void;
+  communityOf: Map<string, CommunityTag>; community: CommunityTag[];
 }) {
-  const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick } = props;
+  const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
   return (
     <>
@@ -292,7 +302,7 @@ function LoopsTab(props: {
               <div className="asset-name"><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol}</div>
             </div>
             <Cell label="Tracked holders" value={fmt(m.tracked)} sub={`${fmt(m.looping)} loop against ${m.debtSymbol}`} />
-            <Cell label={`${a.symbol} supplied`} value={fmt(m.trackedSupplied)} sub={`${pct(m.trackedSharePct)} of the market`} />
+            <Cell label={`${a.symbol} supplied`} value={fmt(m.trackedSupplied)} sub={`${pct(m.trackedSharePct, m.trackedSharePct > 99 && m.trackedSharePct < 100 ? 2 : 1)} of the market`} />
             <Cell label={`${m.debtSymbol} borrowed`} value={fmt(m.trackedDebt)} sub={usd(m.trackedDebtUsd)} />
             <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} />
             <Cell label={`Health factor below ${hfAlert.toFixed(2)}`} value={fmt(m.underAlert)} tone={m.underAlert ? "bad" : ""} sub="tracked holders" />
@@ -308,7 +318,7 @@ function LoopsTab(props: {
           </div>
           {positions.length ? (
             <div className="scroll">
-              <table>
+              <table className="stack positions">
                 <thead>
                   <tr>
                     <th>#</th>
@@ -327,18 +337,18 @@ function LoopsTab(props: {
                     const on = current?.asset === asset && current.p.address === p.address;
                     return (
                       <tr key={`${asset}:${p.address}`} className={`pick ${on ? "on" : ""}`} onClick={() => onPick(asset, p.address)}>
-                        <td className="num muted">{p.rank}</td>
-                        {many ? <td className="nw">{asset}</td> : null}
-                        <td>
+                        <td className="num muted rank">{p.rank}</td>
+                        {many ? <td className="nw" data-label="Asset">{asset}</td> : null}
+                        <td className="who">
                           <button className="rowbtn" aria-pressed={on} onClick={(e) => { e.stopPropagation(); onPick(asset, p.address); }}>{holderName(p)}</button>
                           <span className="sub">{short(p.address)}</span>
                         </td>
-                        <td><EntityTag entity={p.tag?.entity} colors={colors} /></td>
-                        <td className="r">{fmtAmount(p.supplied)}</td>
-                        <td className="r">{pct(p.sharePct, p.sharePct < 1 ? 2 : 1)}</td>
-                        <td className="r">{p.debt > 0 ? fmtAmount(p.debt) : DASH}</td>
-                        <td className="r">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
-                        <td className="r"><HealthFactor value={p.healthFactor} alert={hfAlert} /></td>
+                        <td className="tagcell">{p.tag ? <EntityTag entity={p.tag.entity} colors={colors} /> : <EntityTag entity={communityOf.get(p.address.toLowerCase())?.entity} colors={colors} community />}</td>
+                        <td className="r" data-label="Supplied">{fmtAmount(p.supplied)}</td>
+                        <td className="r" data-label="Share">{pct(p.sharePct, p.sharePct < 1 ? 2 : 1)}</td>
+                        <td className="r" data-label="Debt">{p.debt > 0 ? fmtAmount(p.debt) : DASH}</td>
+                        <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
+                        <td className="r" data-label="Health factor"><HealthFactor value={p.healthFactor} alert={hfAlert} /></td>
                       </tr>
                     );
                   })}
@@ -351,7 +361,7 @@ function LoopsTab(props: {
         {current ? <PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /> : null}
       </div>
 
-      {current ? <HolderFile row={current} colors={colors} /> : null}
+      {current ? <HolderFile row={current} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /> : null}
 
       <p className="note">
         Health factor, leverage and the drop to liquidation come from Aave for the whole wallet: every collateral and every debt it holds on {shown.length ? loops[shown[0].symbol]?.market.venue ?? "Aave" : "Aave"}, not only this asset.
@@ -398,7 +408,7 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
   );
 }
 
-function HolderFile({ row, colors }: { row: Row; colors: Map<string, string> }) {
+function HolderFile({ row, colors, community }: { row: Row; colors: Map<string, string>; community: CommunityTag[] }) {
   const { asset, p } = row;
   const [detail, setDetail] = useState<HolderDetail | null>(null);
   const [rows, setRows] = useState<Tx[] | null>(null);
@@ -434,21 +444,27 @@ function HolderFile({ row, colors }: { row: Row; colors: Map<string, string> }) 
           </div>
           {detail?.notes.length ? (
             <div className="scroll">
-              <table>
+              <table className="stack notes">
                 <thead><tr><th>Source</th><th>Finding</th><th>Linked to</th><th>Confidence</th></tr></thead>
                 <tbody>
                   {detail.notes.map((n, i) => (
                     <tr key={i}>
-                      <td className="top nw">{n.source}</td>
-                      <td className="top">{n.finding}</td>
-                      <td className="top"><EntityTag entity={n.linkedEntity} colors={colors} /></td>
-                      <td className="top nw">{n.confidence}</td>
+                      <td className="top nw" data-label="Source">{n.source}</td>
+                      <td className="top finding" data-label="Finding">{n.finding}</td>
+                      <td className="top" data-label="Linked to"><EntityTag entity={n.linkedEntity} colors={colors} /></td>
+                      <td className="top nw" data-label="Confidence">{n.confidence}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : <p className="note">No team note on this wallet yet. Add one in data/notes.json.</p>}
+          {community.length ? (
+            <div className="ctags">
+              <p className="k">Tagged on the site</p>
+              {community.map((t) => <CommunityCard key={t.id} t={t} colors={colors} />)}
+            </div>
+          ) : <p className="note">Nobody has tagged this wallet on the site yet. Add a tag in Tagged entities.</p>}
           <p className="note">Contract name, ENS, deployer and public labels are read from Blockscout. Counterparties in the transactions are matched against the team’s tagged addresses.</p>
         </div>
       </div>
@@ -592,8 +608,11 @@ function TxTab(props: {
 
 // ── Tagged entities ─────────────────────────────────────────────────────────
 
-function EntitiesTab(props: { registry: RegistryData | null; positions: Row[]; shown: Shown; tx: Record<string, Tx[]>; txBusy: boolean; colors: Map<string, string> }) {
-  const { registry, positions, shown, tx, txBusy, colors } = props;
+function EntitiesTab(props: {
+  registry: RegistryData | null; positions: Row[]; shown: Shown; tx: Record<string, Tx[]>; txBusy: boolean; colors: Map<string, string>;
+  community: CommunityTag[]; communityError: string | null; onCommunityChange: () => void;
+}) {
+  const { registry, positions, shown, tx, txBusy, colors, community, communityError, onCommunityChange } = props;
   const entities = registry?.entities ?? [];
   const holdersTx = shown.flatMap((a) => tx[`${a.symbol}:holders`] ?? []);
 
@@ -605,6 +624,9 @@ function EntitiesTab(props: { registry: RegistryData | null; positions: Row[]; s
 
   return (
     <>
+      <CommunityPanel positions={positions} entities={Array.from(new Set([...entities.map((e) => e.entity), ...community.map((t) => t.entity)]))}
+        tags={community} error={communityError} colors={colors} onChange={onCommunityChange} />
+
       <div className="panel">
         <div className="panel-head">
           <h2>Entities</h2>
@@ -691,5 +713,162 @@ function EntitiesTab(props: { registry: RegistryData | null; positions: Row[]; s
         </div>
       </div>
     </>
+  );
+}
+
+// ── Community tags ──────────────────────────────────────────────────────────
+
+function CommunityCard({ t, colors, onRemove, mine }: { t: CommunityTag; colors: Map<string, string>; onRemove?: () => void; mine?: boolean }) {
+  return (
+    <div className="ccard">
+      <div className="ccard-head">
+        <EntityTag entity={t.entity} colors={colors} community />
+        {t.label ? <span>{t.label}</span> : null}
+        <span className={`conf ${t.confidence.toLowerCase()}`}>{t.confidence}</span>
+      </div>
+      <p className="ccard-why">{t.reasoning}</p>
+      {t.links.length ? (
+        <div className="ccard-links">{t.links.map((l) => <a key={l} className="link" href={l} target="_blank" rel="noopener noreferrer">{l.replace(/^https?:\/\/(www\.)?/, "").slice(0, 48)}</a>)}</div>
+      ) : null}
+      <p className="ccard-by">
+        Tagged by <strong>{t.author}</strong> · {when(t.createdAt)}
+        {mine && onRemove ? <button className="textbtn" onClick={onRemove}>Remove</button> : null}
+      </p>
+    </div>
+  );
+}
+
+const NAME_KEY = "loop-tracker:name";
+
+function CommunityPanel({ positions, entities, tags, error, colors, onChange }: {
+  positions: Row[]; entities: string[]; tags: CommunityTag[]; error: string | null; colors: Map<string, string>; onChange: () => void;
+}) {
+  const [author, setAuthor] = useState("");
+  const [holder, setHolder] = useState("");
+  const [other, setOther] = useState("");
+  const [entity, setEntity] = useState("");
+  const [label, setLabel] = useState("");
+  const [confidence, setConfidence] = useState<CommunityTag["confidence"]>("Probable");
+  const [reasoning, setReasoning] = useState("");
+  const [links, setLinks] = useState("");
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => { try { setAuthor(localStorage.getItem(NAME_KEY) ?? ""); } catch { /* storage blocked */ } }, []);
+  const address = holder === "other" ? other.trim() : holder;
+  const nameOf = (a: string) => {
+    const r = positions.find((x) => x.p.address.toLowerCase() === a.toLowerCase());
+    return r ? `#${r.p.rank} ${holderName(r.p)}` : short(a);
+  };
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSending(true); setMessage(null);
+    try {
+      const res = await fetch("/api/community-tags", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ author, address, entity, label, confidence, reasoning, links: links.split(/\s+/).filter(Boolean) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Could not save (${res.status})`);
+      try { localStorage.setItem(NAME_KEY, author); } catch { /* storage blocked */ }
+      setMessage({ ok: true, text: `Saved. Everyone with access now sees ${entity} on ${nameOf(address)}.` });
+      setReasoning(""); setLinks(""); setLabel("");
+      onChange();
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : "Could not save" });
+    }
+    setSending(false);
+  }
+
+  async function remove(t: CommunityTag) {
+    const res = await fetch(`/api/community-tags?id=${encodeURIComponent(t.id)}&author=${encodeURIComponent(author)}`, { method: "DELETE" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) setMessage({ ok: false, text: body.error ?? "Could not remove" });
+    onChange();
+  }
+
+  const shownTags = filter ? tags.filter((t) => t.address.toLowerCase() === filter) : tags;
+  return (
+    <div className="two community">
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Tag a holder</h2>
+          <p className="hint">Visible to everyone with access to the site</p>
+        </div>
+        <form className="body form" onSubmit={submit}>
+          <label className="field">
+            <span>Your name</span>
+            <input id="ct-author" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="e.g. Elliot" maxLength={40} required />
+          </label>
+          <label className="field">
+            <span>Holder</span>
+            <select id="ct-holder" value={holder} onChange={(e) => setHolder(e.target.value)} required>
+              <option value="" disabled>Choose a holder</option>
+              {positions.map(({ asset, p }) => <option key={`${asset}:${p.address}`} value={p.address}>#{p.rank} {holderName(p)} · {short(p.address)}</option>)}
+              <option value="other">Another address…</option>
+            </select>
+          </label>
+          {holder === "other" ? (
+            <label className="field">
+              <span>Address</span>
+              <input id="ct-address" className="mono" value={other} onChange={(e) => setOther(e.target.value)} placeholder="0x…" pattern="0x[0-9a-fA-F]{40}" required />
+            </label>
+          ) : null}
+          <div className="row2">
+            <label className="field">
+              <span>Entity</span>
+              <input id="ct-entity" list="ct-entities" value={entity} onChange={(e) => setEntity(e.target.value)} placeholder="e.g. Kelp" maxLength={60} required />
+              <datalist id="ct-entities">{entities.map((n) => <option key={n} value={n} />)}</datalist>
+            </label>
+            <label className="field">
+              <span>Confidence</span>
+              <select id="ct-confidence" value={confidence} onChange={(e) => setConfidence(e.target.value as CommunityTag["confidence"])}>
+                <option>Confirmed</option><option>Probable</option><option>Possible</option>
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            <span>Label <em>optional</em></span>
+            <input id="ct-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Treasury Safe 2" maxLength={60} />
+          </label>
+          <label className="field">
+            <span>Why you think so</span>
+            <textarea id="ct-reasoning" value={reasoning} onChange={(e) => setReasoning(e.target.value)} rows={4} maxLength={1500} required
+              placeholder="What links this wallet to the entity: funding source, shared deployer, a post, a conversation…" />
+          </label>
+          <label className="field">
+            <span>Links <em>optional, one per line</em></span>
+            <textarea id="ct-links" className="mono" value={links} onChange={(e) => setLinks(e.target.value)} rows={2} placeholder="https://etherscan.io/tx/…" />
+          </label>
+          <div className="formfoot">
+            <button className="primary" type="submit" disabled={sending}>{sending ? "Saving…" : "Add tag"}</button>
+            {message ? <p className={message.ok ? "good" : "bad"} role="status">{message.text}</p> : null}
+          </div>
+        </form>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Tagged on the site <span className="muted">{tags.length}</span></h2>
+          <select aria-label="Filter by holder" value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="">All holders</option>
+            {Array.from(new Set(tags.map((t) => t.address.toLowerCase()))).map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
+          </select>
+        </div>
+        {error ? <p className="empty">Could not load community tags: {error}</p>
+          : shownTags.length ? (
+            <div className="body clist">
+              {shownTags.map((t) => (
+                <div key={t.id}>
+                  <p className="k">{nameOf(t.address)} <span className="mono">{short(t.address)}</span></p>
+                  <CommunityCard t={t} colors={colors} mine={Boolean(author) && t.author.toLowerCase() === author.trim().toLowerCase()} onRemove={() => remove(t)} />
+                </div>
+              ))}
+            </div>
+          ) : <p className="empty">No tag yet. The first one you add shows here for everyone.</p>}
+      </div>
+    </div>
   );
 }

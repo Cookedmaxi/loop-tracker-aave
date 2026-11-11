@@ -15,9 +15,9 @@ export function middleware(request: NextRequest) {
     const given = atob(header.slice(6)).split(":").slice(1).join(":");
     if (given === password) return NextResponse.next();
   }
-  return new NextResponse("Sign in to open the Loop Monitor.", {
+  return new NextResponse("Sign in to open Loop Tracker.", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="TokenLogic Loop Monitor"' },
+    headers: { "WWW-Authenticate": 'Basic realm="TokenLogic Loop Tracker"' },
   });
 }
 
