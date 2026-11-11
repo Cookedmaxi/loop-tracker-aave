@@ -63,3 +63,11 @@ export async function hdel(key: string, field: string): Promise<void> {
   if (kind === "file") { const d = await readFile(); delete d[key]?.[field]; await writeFile(d); return; }
   unavailable();
 }
+
+/** All fields of a hash. */
+export async function hkeys(key: string): Promise<string[]> {
+  const kind = storageKind();
+  if (kind === "redis") return (await redis(["HKEYS", key])) ?? [];
+  if (kind === "file") return Object.keys((await readFile())[key] ?? {});
+  return unavailable();
+}

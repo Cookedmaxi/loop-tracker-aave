@@ -6,10 +6,10 @@
 // minute). RPC providers cap how many blocks one eth_getLogs may span: the lookback is read
 // in windows of LOGS_BLOCK_RANGE blocks, and a window the provider refuses is split in two.
 
-import { formatUnits, parseAbi, parseAbiItem, type Log } from "viem";
+import { formatUnits, parseAbi, parseAbiItem, parseEventLogs, toEventSelector } from "viem";
 import { AAVE_V3_CORE, type Address } from "@/config/assets";
 import { client, type Reserve } from "./chain";
-import { hget, hset, storageKind } from "./store";
+import { hget, hkeys, hset, storageKind } from "./store";
 
 const EVENTS = {
   Supply: parseAbiItem("event Supply(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referralCode)"),
@@ -30,7 +30,7 @@ export interface AaveEvent {
 }
 
 const LOOKBACK = Number(process.env.AAVE_EVENTS_LOOKBACK_BLOCKS ?? 216_000); // about 30 days
-const RANGE = Number(process.env.LOGS_BLOCK_RANGE ?? 10_000);
+const RANGE = Number(process.env.LOGS_BLOCK_RANGE ?? 0); // 0: ask for the whole span, split only if refused
 
 const tokenInfo = new Map<string, Promise<{ symbol: string; decimals: number }>>();
 function info(token: Address) {
@@ -53,43 +53,66 @@ function timeOf(block: bigint): Promise<string> {
 
 type Filter = { reserves: Reserve; wallets?: Address[]; collateralOnly?: boolean };
 
-/** One eth_getLogs per event over [from, to]; halves the span when the RPC refuses it as too wide. */
-async function logsIn(f: Filter, from: bigint, to: bigint): Promise<Log[]> {
-  const c = client();
-  const assets = f.collateralOnly ? [f.reserves.underlying] : [f.reserves.underlying, f.reserves.debtUnderlying];
-  const users = f.wallets?.length ? f.wallets : undefined;
-  const window = { address: AAVE_V3_CORE.pool, fromBlock: from, toBlock: to } as const;
-  // A few new blocks: one call for all five events, filtered here. Cheaper than five calls.
-  if (to - from <= 300n) {
-    const inSet = (x: string | undefined, set?: string[]) => !set || (!!x && set.some((s) => s.toLowerCase() === x.toLowerCase()));
-    const all = await c.getLogs({ ...window, events: Object.values(EVENTS) });
-    return all.filter((l: any) => {
-      const a = l.args;
-      if (l.eventName === "LiquidationCall") return inSet(a.collateralAsset, [f.reserves.underlying]) && inSet(a.user, users);
-      const who = l.eventName === "Supply" || l.eventName === "Borrow" ? a.onBehalfOf : a.user;
-      return inSet(a.reserve, assets) && inSet(who, users);
-    });
-  }
+const pad = (a: string) => `0x${a.toLowerCase().replace(/^0x/, "").padStart(64, "0")}` as `0x${string}`;
+const SIG = Object.fromEntries(Object.entries(EVENTS).map(([k, v]) => [k, toEventSelector(v)])) as Record<keyof typeof EVENTS, `0x${string}`>;
+const ABI = Object.values(EVENTS);
+
+// Learned from the provider's refusal message (e.g. "up to a 500 block range").
+let maxSpan: number | null = RANGE > 0 ? RANGE : null;
+
+class SpanTooWide extends Error {}
+
+async function rawLogs(from: bigint, to: bigint, topics: (`0x${string}` | `0x${string}`[] | null)[]): Promise<any[]> {
   try {
-    // One after the other: free RPC plans cap compute units per second.
-    const out: Log[] = [];
-    out.push(...await c.getLogs({ ...window, event: EVENTS.Supply, args: { reserve: assets, onBehalfOf: users } }));
-    out.push(...await c.getLogs({ ...window, event: EVENTS.Withdraw, args: { reserve: assets, user: users } }));
-    out.push(...await c.getLogs({ ...window, event: EVENTS.Borrow, args: { reserve: assets, onBehalfOf: users } }));
-    out.push(...await c.getLogs({ ...window, event: EVENTS.Repay, args: { reserve: assets, user: users } }));
-    out.push(...await c.getLogs({ ...window, event: EVENTS.LiquidationCall, args: { collateralAsset: f.reserves.underlying, user: users } }));
-    return out;
+    return await client().request({
+      method: "eth_getLogs",
+      params: [{ address: AAVE_V3_CORE.pool, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics }],
+    } as any) as any[];
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (to - from < 10n || !/range|limit|too many|exceed|large|10000|response size/i.test(msg)) throw e;
-    const mid = from + (to - from) / 2n;
-    return [...await logsIn(f, from, mid), ...await logsIn(f, mid + 1n, to)];
+    const msg = e instanceof Error ? `${e.message} ${(e as any).details ?? ""}` : String(e);
+    if (!/range|limit|too many|exceed|large|response size|10000|results/i.test(msg)) throw e;
+    const n = msg.match(/(\d[\d,]*)\s*block/i)?.[1];
+    if (n) { const v = Number(n.replace(/,/g, "")); if (v > 0 && v < Number(to - from + 1n)) maxSpan = v; }
+    throw new SpanTooWide(msg);
   }
+}
+
+/**
+ * Two eth_getLogs per span: Supply, Withdraw, Borrow and Repay share their layout (reserve
+ * in topic 1, the wallet in topic 2), so one call reads all four; liquidations are the other.
+ * A span the provider refuses is split in two.
+ */
+async function logsIn(f: Filter, from: bigint, to: bigint): Promise<any[]> {
+  const assets = (f.collateralOnly ? [f.reserves.underlying] : [f.reserves.underlying, f.reserves.debtUnderlying]).map(pad);
+  const users = f.wallets?.length ? f.wallets.map(pad) : null;
+  try {
+    const [actions, liq] = await Promise.all([
+      rawLogs(from, to, [[SIG.Supply, SIG.Withdraw, SIG.Borrow, SIG.Repay], assets, users]),
+      rawLogs(from, to, [SIG.LiquidationCall, pad(f.reserves.underlying), null, users]),
+    ]);
+    return parseEventLogs({ abi: ABI, logs: [...actions, ...liq] });
+  } catch (e) {
+    if (!(e instanceof SpanTooWide) || to - from < 10n) throw e;
+    const span = maxSpan && maxSpan < Number(to - from + 1n) ? BigInt(maxSpan) : (to - from + 1n) / 2n;
+    const parts: [bigint, bigint][] = [];
+    for (let s = from; s <= to; s += span) parts.push([s, s + span - 1n > to ? to : s + span - 1n]);
+    return (await pooled(parts.map(([a, b]) => () => logsIn(f, a, b)), 4)).flat();
+  }
+}
+
+/** Runs tasks with at most `n` at a time. */
+async function pooled<T>(tasks: (() => Promise<T>)[], n: number): Promise<T[]> {
+  const out: T[] = new Array(tasks.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => {
+    while (i < tasks.length) { const k = i++; out[k] = await tasks[k](); }
+  }));
+  return out;
 }
 
 async function toEvent(l: any): Promise<AaveEvent> {
   const a = l.args;
-  const base = { txHash: l.transactionHash, logIndex: Number(l.logIndex), block: Number(l.blockNumber), timestamp: await timeOf(l.blockNumber) };
+  const base = { txHash: l.transactionHash, logIndex: Number(l.logIndex), block: Number(l.blockNumber), timestamp: await timeOf(BigInt(l.blockNumber)) };
   if (l.eventName === "LiquidationCall") {
     const [debt, coll] = await Promise.all([info(a.debtAsset), info(a.collateralAsset)]);
     return { ...base, action: "Liquidation", wallet: a.user, counterparty: a.liquidator, reserve: a.debtAsset, symbol: debt.symbol,
@@ -102,14 +125,13 @@ async function toEvent(l: any): Promise<AaveEvent> {
   return { ...base, action: l.eventName, wallet, counterparty: other && other.toLowerCase() !== wallet.toLowerCase() ? other : null, reserve: a.reserve, symbol: t.symbol, amount };
 }
 
-/** Aave events over a block span, read in windows of LOGS_BLOCK_RANGE. */
+/** Aave events over a block span: in one go when the provider allows it, else in learned chunks. */
 async function readRange(f: Filter, from: bigint, to: bigint): Promise<AaveEvent[]> {
-  const logs: Log[] = [];
-  for (let s = from; s <= to; s += BigInt(RANGE)) {
-    const e = s + BigInt(RANGE) - 1n > to ? to : s + BigInt(RANGE) - 1n;
-    logs.push(...await logsIn(f, s, e));
-  }
-  return Promise.all(logs.map(toEvent));
+  const parts: [bigint, bigint][] = [];
+  const span = BigInt(maxSpan ?? Number(to - from + 1n));
+  for (let s = from; s <= to; s += span) parts.push([s, s + span - 1n > to ? to : s + span - 1n]);
+  const logs = (await pooled(parts.map(([a, b]) => () => logsIn(f, a, b)), 4)).flat();
+  return pooled(logs.map((l) => () => toEvent(l)), 8);
 }
 
 const newest = (x: AaveEvent, y: AaveEvent) => y.block - x.block || y.logIndex - x.logIndex;
@@ -166,4 +188,24 @@ export async function readPoolEvents(reserves: Reserve, opts: { wallets?: Addres
     .sort(newest);
   await save(key, { lastBlock: latest, wallets, events });
   return events;
+}
+
+/** What the saved event history holds, for the Data tab. */
+export async function savedHistory(): Promise<{ feed: string; lastBlock: number; events: number; newest: string | null; where: string }[]> {
+  const keys = new Set<string>(memory.keys());
+  if (storageKind() !== "none") {
+    try { for (const k of await hkeys(HASH)) keys.add(k); } catch { /* storage unreachable */ }
+  }
+  const out = [];
+  for (const k of keys) {
+    const s = await load(k);
+    if (!s) continue;
+    const [symbol, scope, who] = k.split(":");
+    out.push({
+      feed: `${symbol} · ${who === "wallets" ? "tracked holders" : scope === "collateral" ? "market" : "everyone"}`,
+      lastBlock: s.lastBlock, events: s.events.length, newest: s.events[0]?.timestamp ?? null,
+      where: storageKind() === "redis" ? "Upstash" : storageKind() === "file" ? "local file" : "server memory",
+    });
+  }
+  return out;
 }

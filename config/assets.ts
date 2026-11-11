@@ -26,6 +26,8 @@ export const AAVE_V3_CORE = {
   marketKey: "ethereum-core-v3",
   ratesMarket: "Aave V3",
   chain: "ethereum",
+  /** Aave app name of this instance, for links. */
+  appMarket: "proto_mainnet_v3",
   pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2" as Address,
   oracle: "0x54586bE62E3c3580375aE3723C145253060Ca0C2" as Address,
 };

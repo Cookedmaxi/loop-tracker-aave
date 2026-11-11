@@ -5,18 +5,19 @@ import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, Positio
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
-type TabId = "loops" | "market" | "tx" | "entities";
+type TabId = "loops" | "market" | "tx" | "entities" | "data";
 const TABS: { id: TabId; label: string }[] = [
   { id: "loops", label: "Loops" },
   { id: "market", label: "Market" },
   { id: "tx", label: "Last tx" },
   { id: "entities", label: "Tagged entities" },
+  { id: "data", label: "Data" },
 ];
 const TX_TYPES = ["Supply", "Withdraw", "Borrow", "Repay", "Liquidation", "Transfer", "Send", "Receive"];
 const BRAND = ["#2468fc", "#00c880", "#f2c200", "#fc4434", "#8b5cf6", "#06b6d4", "#fb923c", "#e879f9"];
 const DASH = "—";
 
-interface Meta { venue: string; hfAlert: number; assets: { symbol: string; debtSymbol: string; logo: string }[] }
+interface Meta { venue: string; hfAlert: number; assets: { symbol: string; debtSymbol: string; logo: string; aaveUrl?: string; etherscanUrl?: string }[] }
 interface RegistryData { entities: Entity[]; tags: { match: string; label: string; entity: string; kind: string }[] }
 
 const fmt = (n: number | null | undefined, digits = 0) =>
@@ -295,6 +296,7 @@ export default function Page() {
           <EntitiesTab registry={registry} positions={positions} shown={shown} tx={tx} txBusy={txBusy} colors={colors}
             community={community} communityError={communityError} onCommunityChange={loadCommunity} />
         ) : null}
+        {tab === "data" ? <DataTab asOf={asOf} /> : null}
       </main>
     </>
   );
@@ -312,6 +314,7 @@ function LoopsTab(props: {
 }) {
   const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
+  const holder = useHolder(props.current?.asset, props.current?.p.address);
   return (
     <>
       {shown.map((a) => {
@@ -320,8 +323,8 @@ function LoopsTab(props: {
         return (
           <div className="panel strip" key={a.symbol}>
             <div className="cell">
-              <p className="k">{m.venue}</p>
-              <div className="asset-name"><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol}</div>
+              <p className="k"><a className="title-link" href={a.aaveUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} on ${m.venue}, in the Aave app`}>{m.venue} ↗</a></p>
+              <a className="asset-name title-link" href={a.etherscanUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} token on Etherscan`}><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol}</a>
             </div>
             <Cell label="Tracked holders" value={fmt(m.tracked)} sub={`${fmt(m.looping)} loop against ${m.debtSymbol}`} />
             <Cell label={`${a.symbol} supplied`} value={fmt(m.trackedSupplied)} sub={`${pct(m.trackedSharePct, m.trackedSharePct > 99 && m.trackedSharePct < 100 ? 2 : 1)} of the market`} />
@@ -334,6 +337,7 @@ function LoopsTab(props: {
       })}
 
       <div className="split">
+        <div className="col">
         <div className="panel">
           <div className="panel-head">
             <h2>Positions</h2>
@@ -364,7 +368,6 @@ function LoopsTab(props: {
                         {many ? <td className="nw" data-label="Asset">{asset}</td> : null}
                         <td className="who">
                           <button className="rowbtn" aria-pressed={on} onClick={(e) => { e.stopPropagation(); onPick(asset, p.address); }}>{holderName(p)}</button>
-                          {p.liquidations?.length ? <span className="badge bad" title="Liquidated in the last 90 days, per the TokenLogic API">Liquidated</span> : null}
                           <span className="sub">{short(p.address)}</span>
                         </td>
                         <td className="tagcell">{p.tag ? <EntityTag entity={p.tag.entity} colors={colors} /> : <EntityTag entity={communityOf.get(p.address.toLowerCase())?.entity} colors={colors} community />}</td>
@@ -382,16 +385,56 @@ function LoopsTab(props: {
           ) : <p className="empty">{busy ? "Reading positions from the chain…" : "No position to show."}</p>}
         </div>
 
-        {current ? <PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /> : null}
-      </div>
+        {current ? <HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /> : null}
+        <Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} />
+        </div>
 
-      {current ? <HolderFile row={current} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /> : null}
+        <div className="col">
+          {current ? <PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /> : null}
+          {current ? <HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /> : null}
+        </div>
+      </div>
 
       <p className="note">
         Health factor, leverage and the drop to liquidation come from Aave for the whole wallet: every collateral and every debt it holds on {shown.length ? loops[shown[0].symbol]?.market.venue ?? "Aave" : "Aave"}, not only this asset.
         Health factors below {hfAlert.toFixed(2)} are shown in red. The meter fills as the position moves away from liquidation and is full at 1.10.
       </p>
     </>
+  );
+}
+
+/** Every liquidation of a tracked holder over 90 days, kept apart from the positions themselves. */
+function Liquidations({ positions, source }: { positions: Row[]; source?: string }) {
+  const rows = positions
+    .flatMap(({ asset, p }) => (p.liquidations ?? []).map((l) => ({ asset, p, l })))
+    .sort((a, b) => b.l.timestamp.localeCompare(a.l.timestamp));
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Liquidations</h2>
+        <p className="hint">Tracked holders, last 90 days · TokenLogic API</p>
+      </div>
+      {rows.length ? (
+        <div className="scroll">
+          <table className="stack txs">
+            <thead><tr><th>Time</th><th>Holder</th><th className="r">Collateral seized</th><th className="r">Debt repaid</th><th>Tx</th></tr></thead>
+            <tbody>
+              {rows.map(({ asset, p, l }) => (
+                <tr key={`${l.txHash}:${p.address}`}>
+                  <td className="nw time">{when(l.timestamp)}</td>
+                  <td className="who">#{p.rank} {holderName(p)}<span className="sub"><Addr address={p.address} /> · {asset}</span></td>
+                  <td className="r" data-label="Collateral seized">{fmtAmount(l.collateralAmount)} {l.collateralSymbol}</td>
+                  <td className="r" data-label="Debt repaid">{fmtAmount(l.debtAmount)} {l.debtSymbol} · {usd(l.debtUsd)}</td>
+                  <td data-label="Tx"><a className="link mono" href={`https://etherscan.io/tx/${l.txHash}`} target="_blank" rel="noopener noreferrer">{l.txHash.slice(0, 10)}…</a></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="empty">{source === "TokenLogic API" ? "No tracked holder was liquidated in the last 90 days." : "Liquidation history comes from the TokenLogic API: add TOKENLOGIC_API_KEY to show it. Liquidations still appear in each holder’s transactions."}</p>
+      )}
+    </div>
   );
 }
 
@@ -425,10 +468,6 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
           <div className="kv"><span>All collateral on Aave</span><span>{usd(p.totalCollateralUsd)}</span></div>
           <div className="kv"><span>All debt on Aave</span><span>{usd(p.totalDebtUsd)}</span></div>
           <div className="kv"><span>Net equity</span><span>{usd(p.totalCollateralUsd - p.totalDebtUsd)}</span></div>
-          {p.liquidations?.length ? p.liquidations.map((l) => (
-            <div className="kv" key={l.txHash}><span className="bad">Liquidated {when(l.timestamp)}</span>
-              <span><a className="link" href={`https://etherscan.io/tx/${l.txHash}`} target="_blank" rel="noopener noreferrer">{fmtAmount(l.collateralAmount)} {l.collateralSymbol} seized · {usd(l.debtUsd)} repaid</a></span></div>
-          )) : null}
           <div className="kv"><span>Position</span><span>{p.loops ? `${asset}/${debtSymbol} loop` : p.totalDebtUsd > 0 ? "Borrows other assets" : "Supply only"}</span></div>
         </div>
       </div>
@@ -436,26 +475,29 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
   );
 }
 
-function HolderFile({ row, colors, community }: { row: Row; colors: Map<string, string>; community: CommunityTag[] }) {
-  const { asset, p } = row;
+/** Identity and transactions of the selected holder, loaded once for both panels. */
+function useHolder(asset: string | undefined, address: string | undefined) {
   const [detail, setDetail] = useState<HolderDetail | null>(null);
   const [rows, setRows] = useState<Tx[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<"asset" | "all">("asset");
-
   useEffect(() => {
+    if (!asset || !address) return;
     let live = true;
     setDetail(null); setRows(null); setError(null);
-    getJson<HolderDetail>(`/api/holder?address=${p.address}`).then((d) => live && setDetail(d)).catch(() => {});
-    getJson<{ transfers: Tx[] }>(`/api/tx?asset=${asset}&address=${p.address}`)
+    getJson<HolderDetail>(`/api/holder?address=${address}`).then((d) => live && setDetail(d)).catch(() => {});
+    getJson<{ transfers: Tx[] }>(`/api/tx?asset=${asset}&address=${address}`)
       .then((r) => live && setRows(r.transfers))
       .catch((e) => live && setError(e instanceof Error ? e.message : "Failed to load"));
     return () => { live = false; };
-  }, [asset, p.address]);
+  }, [asset, address]);
+  return { detail, rows, error };
+}
 
-  const list = (rows ?? []).filter((t) => scope === "all" || t.assetRelated);
+const teamTag = (t: { entity: string; label: string }) => (t.label.toLowerCase().startsWith(t.entity.toLowerCase()) ? t.label : `${t.entity} · ${t.label}`);
+
+function HolderIdentity({ row, detail, colors, community }: { row: Row; detail: HolderDetail | null; colors: Map<string, string>; community: CommunityTag[] }) {
+  const { p } = row;
   return (
-    <div className="two">
       <div className="panel">
         <div className="panel-head">
           <h2>Identity · {holderName(p)}</h2>
@@ -463,7 +505,7 @@ function HolderFile({ row, colors, community }: { row: Row; colors: Map<string, 
         </div>
         <div className="body">
           <div>
-            <div className="kv"><span>Team tag</span><span>{detail?.tag ? `${detail.tag.entity} · ${detail.tag.label}` : "Not tagged"}</span></div>
+            <div className="kv"><span>Team tag</span><span>{detail?.tag ? teamTag(detail.tag) : "Not tagged"}</span></div>
             <div className="kv"><span>Type</span><span>{p.isContract ? "Contract" : "Wallet (EOA)"}</span></div>
             <div className="kv"><span>Contract name</span><span>{detail?.name ?? p.contractName ?? DASH}</span></div>
             <div className="kv"><span>ENS</span><span>{detail?.ens ?? p.ens ?? DASH}</span></div>
@@ -496,7 +538,14 @@ function HolderFile({ row, colors, community }: { row: Row; colors: Map<string, 
           <p className="note">Contract name, ENS, deployer and public labels are read from Blockscout. Counterparties in the transactions are matched against the team’s tagged addresses.</p>
         </div>
       </div>
+  );
+}
 
+function HolderTx({ row, rows, error, colors }: { row: Row; rows: Tx[] | null; error: string | null; colors: Map<string, string> }) {
+  const { asset, p } = row;
+  const [scope, setScope] = useState<"asset" | "all">("asset");
+  const list = (rows ?? []).filter((t) => scope === "all" || t.assetRelated);
+  return (
       <div className="panel">
         <div className="panel-head">
           <h2>Last transactions · {holderName(p)}</h2>
@@ -510,7 +559,110 @@ function HolderFile({ row, colors, community }: { row: Row; colors: Map<string, 
           : list.length ? <TxTable rows={list} colors={colors} showWallet={false} />
           : <p className="empty">{scope === "asset" ? `No recent ${asset} loop transaction. Switch to all tokens to see the wallet’s other activity.` : "No recent token transfer for this wallet."}</p>}
       </div>
-    </div>
+  );
+}
+
+// ── Data ────────────────────────────────────────────────────────────────────
+
+interface Status {
+  checkedAt: string; cacheSeconds: number;
+  checks: { name: string; ok: boolean | null; ms: number | null; detail: string; asOf: string | null; usedFor: string }[];
+  history: { feed: string; lastBlock: number; events: number; newest: string | null; where: string }[];
+}
+
+const ago = (iso: string | null) => {
+  if (!iso) return DASH;
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  return s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+};
+
+const SOURCES: [string, string][] = [
+  ["Top holders, holder count", "Blockscout"],
+  ["Supplied, borrowed, health factor, leverage of each holder", "Ethereum RPC (aToken and debt-token balances, Pool getUserAccountData)"],
+  ["Reserve status, LTV, liquidation threshold, caps", "Ethereum RPC (Pool configuration)"],
+  ["Price", "TokenLogic API with a key, else the Aave oracle on-chain"],
+  ["Market supply, utilization, supply and borrow APY", "TokenLogic API (supply checked against the on-chain aToken supply)"],
+  ["Supply, Withdraw, Borrow, Repay, Liquidation rows", "Ethereum RPC: the Aave Pool's own events, with block times"],
+  ["Liquidation history (90 days)", "TokenLogic API"],
+  ["Other token transfers", "Blockscout"],
+  ["Contract name, ENS, deployer, public labels", "Blockscout"],
+  ["Team tags and notes", "The repository (data/*.json)"],
+  ["Tags added on the site", "Shared storage (Upstash)"],
+];
+
+function DataTab({ asOf }: { asOf?: string }) {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const check = useCallback(() => {
+    setBusy(true); setError(null);
+    getJson<Status>("/api/status").then(setStatus).catch((e) => setError(e instanceof Error ? e.message : "Failed")).finally(() => setBusy(false));
+  }, []);
+  useEffect(() => { check(); const id = window.setInterval(check, 60_000); return () => window.clearInterval(id); }, [check]);
+
+  const core = status?.checks.filter((c) => c.ok !== null && c.name !== "Shared storage") ?? [];
+  const live = core.length > 0 && core.every((c) => c.ok);
+  const rpc = status?.checks[0];
+  return (
+    <>
+      <div className="panel strip">
+        <div className="cell">
+          <p className="k">Site</p>
+          <p className="v"><span className={`dot ${status ? (live ? "ok" : "bad") : ""}`} aria-hidden="true" />{status ? (live ? "Live" : "Degraded") : busy ? "Checking…" : DASH}</p>
+          <p className="sub">{status ? `checked ${ago(status.checkedAt)}` : ""}</p>
+        </div>
+        <Cell label="Positions last read" value={asOf ? ago(asOf) : DASH} sub={asOf ? when(asOf) : "open the Loops tab"} />
+        <Cell label="Latest block" value={rpc?.ok ? rpc.detail.split(",")[0].replace("Block ", "") : DASH} sub={rpc?.asOf ? `mined ${ago(rpc.asOf)}` : ""} />
+        <Cell label="Refresh" value="Every minute" sub={`while the page is open · server cache ${status?.cacheSeconds ?? 60}s`} />
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Data sources</h2>
+          <button className="chip plain" onClick={check} disabled={busy}><span className={busy ? "spin" : ""} aria-hidden="true">↻</span> {busy ? "Checking" : "Check now"}</button>
+        </div>
+        {error ? <p className="empty">Could not check the sources: {error}</p> : !status ? <p className="empty">Checking every source…</p> : (
+          <div className="scroll">
+            <table className="stack status">
+              <thead><tr><th>Source</th><th>Status</th><th>Latest data</th><th className="r">Response</th><th>Used for</th></tr></thead>
+              <tbody>
+                {status.checks.map((c) => (
+                  <tr key={c.name}>
+                    <td className="top nw"><strong>{c.name}</strong></td>
+                    <td className="top" data-label="Status"><span className={`dot ${c.ok === null ? "" : c.ok ? "ok" : "bad"}`} aria-hidden="true" />{c.detail}</td>
+                    <td className="top nw" data-label="Latest data">{c.asOf ? ago(c.asOf) : DASH}</td>
+                    <td className="top r nw" data-label="Response">{c.ms != null ? `${c.ms} ms` : DASH}</td>
+                    <td className="top finding" data-label="Used for">{c.usedFor}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="two">
+        <div className="panel">
+          <div className="panel-head"><h2>Where each figure comes from</h2></div>
+          <div className="body">
+            {SOURCES.map(([what, from]) => <div className="kv" key={what}><span>{what}</span><span>{from}</span></div>)}
+          </div>
+        </div>
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Saved Aave history</h2>
+            <p className="hint">Read once, then only new blocks</p>
+          </div>
+          {status?.history.length ? (
+            <div className="body">
+              {status.history.map((h) => (
+                <div className="kv" key={h.feed}><span>{h.feed}</span><span>{h.events} events · to block {h.lastBlock.toLocaleString("en-US")} · latest {ago(h.newest)} · {h.where}</span></div>
+              ))}
+            </div>
+          ) : <p className="empty">Nothing saved yet. It fills the first time someone opens Last tx or a holder.</p>}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -526,7 +678,12 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
         return (
           <div className="panel" key={a.symbol}>
             <div className="panel-head">
-              <div className="asset-name"><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol} on {m.venue}</div>
+              <div className="asset-name">
+                <AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />
+                <a className="title-link" href={a.etherscanUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} token on Etherscan`}>{a.symbol}</a>
+                <span className="muted">on</span>
+                <a className="title-link" href={a.aaveUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} on ${m.venue}, in the Aave app`}>{m.venue} ↗</a>
+              </div>
               <p className="hint">Read {when(loops[a.symbol].asOf)}</p>
             </div>
             <div className="strip">
