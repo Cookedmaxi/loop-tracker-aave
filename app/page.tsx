@@ -1838,7 +1838,7 @@ function MappingRisk({ m }: { m: MappingResponse }) {
         <Cell label="80% of the debt" value={`${a.positionsFor80Pct} positions`} sub={`HHI ${Math.round(a.hhi).toLocaleString("en-US")}${a.hhi > 2500 ? " · highly concentrated" : a.hhi > 1500 ? " · concentrated" : ""}`} />
         <Cell label="Held by contracts" value={pct(a.contractDebtPct)} sub="of the debt (Safes, vaults, proxies)" />
         <Cell label="Identified" value={pct(a.identifiedDebtPct)} sub="of the debt has an entity tag" />
-        <Cell label="Also on Spark" value={a.sparkPositions ? usd(a.sparkDebtUsd) : DASH} sub={`$${a.sparkPositions} position${a.sparkPositions === 1 ? "" : "s"} with Spark debt`} />
+        <Cell label="Also on Spark" value={a.sparkPositions ? usd(a.sparkDebtUsd) : DASH} sub={`${a.sparkPositions} position${a.sparkPositions === 1 ? "" : "s"} with Spark debt`} />
       </div>
       <div className="two-inner">
         <div className="body">
