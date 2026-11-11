@@ -210,3 +210,19 @@ export interface MappingResponse {
     hfBuckets: { label: string; positions: number; debtUsd: number }[];
   };
 }
+
+// ── Address lookup ──────────────────────────────────────────────────────────
+
+export interface LookupResponse {
+  address: Address; ens: string | null; readAt: string; isContract: boolean;
+  tag: Tag | null; entity: { name: string; status: string | null; approach: string | null } | null;
+  community: CommunityTag[];
+  holdings: {
+    symbol: string; debtSymbol: string; kind: string; rank: number | null; tracked: boolean;
+    supplied: number; suppliedUsd: number; sharePct: number; debtBackedUsd: number;
+    totalCollateralUsd: number; totalDebtUsd: number; healthFactor: number | null;
+    debts: { symbol: string; amount: number; usd: number }[]; mappingRead: boolean;
+  }[];
+  controls: { asset: string; address: Address; rank: number; debtBackedUsd: number; suppliedUsd: number; via: string; tag: string | null }[];
+  spark: { collateralUsd: number; debtUsd: number; healthFactor: number | null } | null;
+}

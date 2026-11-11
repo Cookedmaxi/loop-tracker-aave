@@ -431,3 +431,24 @@ td.neg, span.neg { color: var(--red); }
 .chip.small { padding: 4px 10px; font-size: 12px; }
 .open-site { margin-left: 6px; font-size: 11px; color: var(--muted); text-decoration: none; }
 .open-site:hover { color: var(--text); }
+
+/* Address lookup */
+.search { display: flex; align-items: center; gap: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 0 12px; height: 34px; min-width: 0; }
+.search span { color: var(--muted); font-size: 15px; }
+.search input { background: transparent; border: 0; outline: 0; color: var(--text); font: 13px var(--sans); width: 200px; min-width: 0; }
+.search:focus-within { border-color: var(--blue); }
+.lookup { border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
+.lookup-addr { font-size: 15px; word-break: break-all; }
+.lookup-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lookup-meta .links { margin-left: auto; display: flex; gap: 6px; }
+tr.dim td { opacity: .45; }
+@media (max-width: 900px) { .search input { width: 160px; } }
+.search-m { display: none; }
+.brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lookup-meta { flex-direction: row; justify-content: flex-start; text-align: left; }
+@media (max-width: 900px) {
+  .bar { grid-template-areas: "brand tools" "search search" "nav nav"; }
+  .tools .search { display: none; }
+  .search-m { display: flex; grid-area: search; }
+  .search-m input { width: 100%; }
+}

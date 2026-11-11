@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CommunityTag, Entity, HolderDetail, LoopsResponse, MappingHolder, MappingResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
+import type { CommunityTag, Entity, HolderDetail, LookupResponse, LoopsResponse, MappingHolder, MappingResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -165,6 +165,7 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<{ asset: string; address: string } | null>(null);
   const [urlReady, setUrlReady] = useState(false);
+  const [lookupQ, setLookupQ] = useState<string | null>(null);
   const [tx, setTx] = useState<Record<string, Tx[]>>({});
   const [txBusy, setTxBusy] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
@@ -224,6 +225,7 @@ export default function Page() {
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
     // Shared links: ?asset=rsETH&holder=0x…#loops opens that asset with that holder selected.
     const q = new URLSearchParams(window.location.search);
+    if (q.get("lookup")) setLookupQ(q.get("lookup"));
     getJson<Meta>("/api/assets").then((m) => {
       setMeta(m);
       const a = m.assets.find((x) => x.symbol.toLowerCase() === (q.get("asset") ?? "").toLowerCase());
@@ -278,13 +280,14 @@ export default function Page() {
     if (!urlReady) return;
     const q = new URLSearchParams();
     if (picked.length === 1) q.set("asset", picked[0]);
+    if (lookupQ) q.set("lookup", lookupQ);
     if (sel && tab === "loops" && (picked.length !== 1 || sel.asset === picked[0])) {
       if (picked.length !== 1) q.set("of", sel.asset);
       q.set("holder", sel.address);
     }
     const next = `${window.location.pathname}${q.toString() ? `?${q}` : ""}#${tab}`;
     if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) window.history.replaceState(null, "", next);
-  }, [urlReady, picked, sel, tab]);
+  }, [urlReady, picked, sel, tab, lookupQ]);
 
   const positions = useMemo(() => shown.flatMap((a) => (loops[a.symbol]?.positions ?? []).map((p) => ({ asset: a.symbol, p }))), [shown, loops]);
   const largest = useMemo(() => positions.reduce<Row | null>((b, x) => (!b || x.p.debtUsd > b.p.debtUsd ? x : b), null), [positions]);
@@ -298,14 +301,16 @@ export default function Page() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/tokenlogic.png" alt="TokenLogic" />
           <span className="slash">/</span>
-          <span>Core Offboarding Monitor</span>
+          <span className="brand-name">Core Offboarding Monitor</span>
         </div>
+        <SearchBox className="search-m" onSearch={(v) => setLookupQ(v)} />
         <nav className="nav" role="tablist" aria-label="Sections">
           {TABS.map((t) => (
             <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => openTab(t.id)}>{t.label}</button>
           ))}
         </nav>
         <div className="tools">
+          <SearchBox onSearch={(v) => setLookupQ(v)} />
           {assets.length ? (
             <label className="asset-pick">
               {shown.length === 1 ? <AssetLogo symbol={shown[0].symbol} src={shown[0].logo} /> : <AssetStack assets={assets} />}
@@ -328,6 +333,8 @@ export default function Page() {
           <p className="error" key={key} role="alert"><strong>{key === "site" ? "Site" : key}:</strong> {message}</p>
         ))}
         {!meta && !errors.site ? <p className="empty">Loading…</p> : null}
+        {lookupQ ? <LookupPanel key={lookupQ} query={lookupQ} logoOf={logoOf} colors={colors} onClose={() => setLookupQ(null)}
+          onOpen={(asset, address) => { setPicked([asset]); setSel({ asset, address }); setTab("loops"); setLookupQ(null); window.scrollTo({ top: 0 }); }} /> : null}
 
         {tab === "loops" ? (
           <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community} onAsset={(s) => { setPicked([s]); setSel(null); }}
@@ -2254,4 +2261,89 @@ function CopyLink({ asset, address }: { asset: string; address: string }) {
     setDone(true); window.setTimeout(() => setDone(false), 1600);
   };
   return <button className="chip plain small" onClick={copy} title="Copy a link that opens the site on this position">{done ? "Link copied" : "Copy link"}</button>;
+}
+
+
+// ── Address lookup ──────────────────────────────────────────────────────────
+
+function SearchBox({ onSearch, className = "" }: { onSearch: (v: string) => void; className?: string }) {
+  const [v, setV] = useState("");
+  const submit = (e: React.FormEvent) => { e.preventDefault(); const x = v.trim(); if (x) onSearch(x); };
+  return (
+    <form className={`search ${className}`} onSubmit={submit} role="search">
+      <span aria-hidden="true">⌕</span>
+      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="Look up an address or ENS" aria-label="Look up an address or ENS name" spellCheck={false} autoComplete="off" />
+    </form>
+  );
+}
+
+function LookupPanel({ query, logoOf, colors, onClose, onOpen }: { query: string; logoOf: (s: string) => string | undefined; colors: Map<string, string>; onClose: () => void; onOpen: (asset: string, address: string) => void }) {
+  const [res, setRes] = useState<LookupResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    getJson<LookupResponse>(`/api/lookup?address=${encodeURIComponent(query)}`).then((r) => live && setRes(r)).catch((e) => live && setError(e instanceof Error ? e.message : "Failed"));
+    return () => { live = false; };
+  }, [query]);
+  const held = res?.holdings.filter((h) => h.supplied > 0) ?? [];
+  const verdict = !res ? "" : held.some((h) => h.kind === "Loop") ? "Loops a tracked asset" : held.some((h) => h.debtBackedUsd > 0) ? "Borrows against a tracked asset" : held.length ? "Holds a tracked asset, no debt" : res.controls.length ? "Controls tracked positions" : "Not a holder of any tracked asset";
+  return (
+    <div className="panel lookup">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Address lookup</p>
+          <h2 className="mono lookup-addr">{res?.ens ? `${res.ens} · ` : ""}{res?.address ?? query}</h2>
+        </div>
+        <div className="head-actions">
+          {res ? <span className={`status ${held.length || res.controls.length ? "done" : "pending"}`}>{verdict}</span> : null}
+          <button className="chip plain small" onClick={onClose} aria-label="Close lookup">Close</button>
+        </div>
+      </div>
+      {error ? <p className="empty">{error}</p> : !res ? <p className="empty">Reading the address on every tracked asset…</p> : (
+        <>
+          <div className="body lookup-meta">
+            {res.tag ? <EntityTag entity={res.tag.entity} colors={colors} /> : null}
+            <span className="muted">{res.tag ? res.tag.label : "No team tag"}{res.isContract ? " · contract" : " · wallet"}</span>
+            {res.community.map((t) => <span key={t.id} className="muted">· site tag: {t.entity}{t.label ? ` (${t.label})` : ""}</span>)}
+            <span className="links">{EXPLORERS.map(([name, url]) => <a key={name} className="btn" href={url(res.address)} target="_blank" rel="noopener noreferrer">{name}</a>)}</span>
+          </div>
+          {res.entity?.status ? <div className="body"><p className="note">{res.entity.status}{res.entity.approach ? ` Approach: ${res.entity.approach}.` : ""}</p></div> : null}
+          <div className="scroll">
+            <table className="stack overview">
+              <thead><tr><th>Asset</th><th>Position</th><th className="r">Supplied</th><th className="r">Share</th><th className="r">Debt backed</th><th className="r">Account debt</th><th className="r">Health factor</th><th></th></tr></thead>
+              <tbody>
+                {res.holdings.map((h) => (
+                  <tr key={h.symbol} className={h.supplied > 0 ? "" : "dim"}>
+                    <td className="nw"><span className="asset-inline"><AssetLogo symbol={h.symbol} src={logoOf(h.symbol)} /><strong>{h.symbol}</strong></span></td>
+                    <td data-label="Position">{h.kind}{h.rank ? <span className="sub">#{h.rank} holder</span> : null}</td>
+                    <td className="r" data-label="Supplied">{h.supplied > 0 ? <>{fmtAmount(h.supplied)} {h.symbol}<span className="sub">{usd(h.suppliedUsd)}</span></> : DASH}</td>
+                    <td className="r" data-label="Share">{h.supplied > 0 ? pct(h.sharePct, h.sharePct < 1 ? 2 : 1) : DASH}</td>
+                    <td className="r" data-label="Debt backed">{h.debtBackedUsd > 0 ? <>{usd(h.debtBackedUsd)}{h.debts.length ? <span className="sub">{h.debts.slice(0, 2).map((d) => d.symbol).join(" + ")}</span> : null}</> : DASH}</td>
+                    <td className="r" data-label="Account debt">{h.supplied > 0 && h.totalDebtUsd > 0 ? usd(h.totalDebtUsd) : DASH}</td>
+                    <td className="r" data-label="Health factor">{h.supplied > 0 && h.healthFactor ? <HealthFactor value={h.healthFactor} alert={1.03} /> : DASH}</td>
+                    <td className="r">{h.tracked ? <button className="chip plain small" onClick={() => onOpen(h.symbol, res.address)}>Open position</button> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {res.controls.length ? (
+            <div className="body">
+              <p className="k">Positions this address controls</p>
+              {res.controls.map((x) => (
+                <div className="kv" key={`${x.asset}:${x.address}`}>
+                  <span>{x.via} of <span className="mono">{short(x.address)}</span>{x.tag ? ` · ${x.tag}` : ""}</span>
+                  <span>{x.asset} #{x.rank} · {usd(x.debtBackedUsd)} debt <button className="chip plain small" onClick={() => onOpen(x.asset, x.address)}>Open</button></span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="body">
+            {res.spark ? <p className="note">Also on Spark: {usd(res.spark.collateralUsd)} collateral, {usd(res.spark.debtUsd)} debt{res.spark.healthFactor ? `, health factor ${res.spark.healthFactor.toFixed(3)}` : ""}.</p> : null}
+            <p className="note">Read on-chain {when(res.readAt)}. “Controls” covers Safe signers and contract owners of tracked positions backing $10k+ of debt.{res.holdings.some((h) => !h.mappingRead) ? " Some holder lists were still building; search again in a minute for ranks." : ""}</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
