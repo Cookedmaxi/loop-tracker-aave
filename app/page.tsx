@@ -606,7 +606,7 @@ function DataTab({ asOf }: { asOf?: string }) {
           <p className="sub">{status ? `checked ${ago(status.checkedAt)}` : ""}</p>
         </div>
         <Cell label="Positions last read" value={asOf ? ago(asOf) : DASH} sub={asOf ? when(asOf) : "open the Loops tab"} />
-        <Cell label="Latest block" value={rpc?.ok ? rpc.detail.split(",")[0].replace("Block ", "") : DASH} sub={rpc?.asOf ? `mined ${ago(rpc.asOf)}` : ""} />
+        <Cell label="Latest block" value={rpc?.ok ? rpc.detail.match(/Block ([\d,]+)/)?.[1] ?? DASH : DASH} sub={rpc?.asOf ? `mined ${ago(rpc.asOf)}` : ""} />
         <Cell label="Refresh" value="Every minute" sub={`while the page is open · server cache ${status?.cacheSeconds ?? 60}s`} />
       </div>
 
