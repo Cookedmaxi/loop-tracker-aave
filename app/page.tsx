@@ -336,9 +336,9 @@ function LoopsTab(props: {
         );
       })}
 
-      <div className="split">
+      <div className="split loops-layout">
         <div className="col">
-        <div className="panel">
+        <div className="panel o-positions">
           <div className="panel-head">
             <h2>Positions</h2>
             <p className="hint">Select a row to open the holder</p>
@@ -385,13 +385,13 @@ function LoopsTab(props: {
           ) : <p className="empty">{busy ? "Reading positions from the chain…" : "No position to show."}</p>}
         </div>
 
-        {current ? <HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /> : null}
-        <Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} />
+        {current ? <div className="o-tx"><HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /></div> : null}
+        <div className="o-liq"><Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} /></div>
         </div>
 
         <div className="col">
-          {current ? <PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /> : null}
-          {current ? <HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /> : null}
+          {current ? <div className="o-card"><PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /></div> : null}
+          {current ? <div className="o-id"><HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /></div> : null}
         </div>
       </div>
 
