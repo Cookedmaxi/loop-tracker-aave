@@ -44,6 +44,7 @@ async function save(field: string, value: unknown) {
 /** Days of history kept for the chart and the offboarding calendar. */
 const HISTORY_DAYS = 90;
 const BACKFILL_PER_CALL = 24;
+const historyErrors = new Map<string, string>();
 const isoDay = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
 
 /** One reading per day at 00:00 UTC: the asset's supply on Aave and the tracked holders' debt. */
@@ -59,6 +60,7 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
   const saved = (await load<Record<string, PlanDay>>(key)) ?? {};
   const out: PlanDay[] = [];
   let changed = false;
+  const failed: string[] = [];
   const dec = Number(await c.readContract({ address: r.aToken, abi: erc20, functionName: "decimals" }));
   const readDay = async (t: number): Promise<PlanDay | null> => {
     const date = isoDay(t);
@@ -81,7 +83,7 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
         return s + (coll > 0 ? debt * Math.min(1, mine / coll) : 0);
       }, 0);
       return { date, block: Number(block), supplied: Number(formatUnits(supply, dec)), debt: dpx ? debtUsd / dpx : 0, debtUsd, rate: Number(price) / Number(debtPrice) };
-    } catch { return null; /* the RPC may not serve old state (no archive): skip the day */ }
+    } catch (e) { failed.push(`${date}: ${(e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 160)}`); return null; /* the RPC may not serve old state (no archive): skip the day */ }
   };
   // Newest first, and at most BACKFILL_PER_CALL days per request: a cold start fills the
   // calendar over a few visits instead of timing out.
@@ -91,6 +93,7 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
   }
   for (const t of days) if (saved[isoDay(t)]) out.push(saved[isoDay(t)]);
   if (changed) await save(key, saved);
+  if (failed.length) historyErrors.set(r.symbol, `${failed.length} past days could not be read (${failed[0]})`); else historyErrors.delete(r.symbol);
   return out;
 }
 
@@ -229,6 +232,7 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
     const debtUsdNow = loopers.reduce((s, p) => s + p.debtUsd, 0);
     const base = days.find((d) => d.date === plan.baseline.date) ?? null;
     if (!days.length) notes.push("Daily history needs an RPC that serves past state (Alchemy does).");
+    if (historyErrors.has(r.symbol)) notes.push(historyErrors.get(r.symbol)!);
 
     const y = carryNow?.yieldPct ?? null, b = carryNow?.borrowPct ?? null;
     const roe = (L: number, extraBps: number) => (y == null || b == null ? null : L * y - (L - 1) * (b + extraBps / 100));
