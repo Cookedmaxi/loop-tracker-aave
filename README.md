@@ -23,11 +23,11 @@ npm run dev                  # http://localhost:3000
 
 1. Push this folder to a Git repository.
 2. In Vercel: **Add New → Project**, import the repository (framework is detected as Next.js).
-3. Add the environment variables: `RPC_URL`, `SITE_PASSWORD`, `TOKENLOGIC_API_KEY`.
+3. Add the environment variables: `RPC_URL`, `TOKENLOGIC_API_KEY`, and `SITE_PASSWORD` to require a password (optional).
 4. In **Storage**, add Upstash Redis (Marketplace) and connect it to the project, so tags added on the site are shared.
 5. Deploy. Every later `git push` redeploys automatically.
 
-The site asks for the password through the browser's sign-in prompt (any username). In production it refuses to start without `SITE_PASSWORD`.
+With `SITE_PASSWORD` set, the site asks for it through the browser's sign-in prompt (any username). Without it, anyone with the link can open the site.
 
 ## Everyday changes
 
