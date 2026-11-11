@@ -370,3 +370,17 @@ table.report-table th { color: var(--muted); font-weight: 500; }
 .logo-stack > span { position: relative; display: block; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg); }
 .logo-stack > span + span { margin-left: -4px; }
 .logo-stack .logo { width: 18px; height: 18px; object-fit: cover; }
+
+/* Mapping */
+.stack-bar.tall { height: 14px; cursor: default; }
+.stack-bar > div { transition: opacity .15s; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
+.legend span { cursor: default; }
+.legend span.on { color: var(--text); }
+.search { background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; color: var(--text); font-size: 13px; min-width: 220px; }
+.notes-ul { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; line-height: 1.55; }
+.notes-ul li { margin: 4px 0; }
+td.bad { color: #fc4434; }
+.pick-grid { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 18px; }
+.pick-card { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-weight: 500; cursor: pointer; }
+.pick-card:hover { border-color: var(--blue); }

@@ -169,3 +169,37 @@ export interface RiskResponse {
   incidents: { date: string; title: string; text: string; links: { label: string; url: string }[] }[];
   warnings: string[];
 }
+
+// ── Mapping tab ─────────────────────────────────────────────────────────────
+
+export interface MappingHolder {
+  rank: number; address: Address; isContract: boolean; contractName: string | null; ens: string | null;
+  tag: string | null; entity: string | null;
+  supplied: number; suppliedUsd: number; sharePct: number;
+  kind: "Loop" | "Borrows stables" | "Borrows other assets" | "Supply only";
+  loopsAgainst: string | null;
+  debts: { symbol: string; amount: number; usd: number }[];
+  otherCollateral: { symbol: string; amount: number; usd: number }[];
+  totalCollateralUsd: number; totalDebtUsd: number; debtBackedUsd: number;
+  healthFactor: number | null; ltvPct: number | null; leverage: number | null; netEquityUsd: number;
+  collateralInDebtUnits: number | null; debtPerUnit: number | null; unitsInDebt: number | null;
+  dropToLiquidationPct: number | null; shareOfDebtPct: number | null;
+  spark: { collateralUsd: number; debtUsd: number; healthFactor: number | null } | null;
+}
+
+export interface MappingResponse {
+  symbol: string; debtSymbol: string; readAt: string; priceUsd: number; rate: number | null;
+  totalSupplied: number; totalSuppliedUsd: number; holderCount: number | null; listed: number; dustUsd: number;
+  top1Pct: number; top3Pct: number; top10Pct: number;
+  loopers: number; bigLoops: number; loopSupplied: number; loopSharePct: number;
+  debtBackedUsd: number; debtByAsset: { symbol: string; amount: number; usd: number }[];
+  leverageRange: [number, number] | null; ltvRange: [number, number] | null;
+  othersCount: number; othersSupplied: number;
+  holders: MappingHolder[];
+  /** Every position backing at least $10k, largest first (loops and other borrowers). */
+  loops: MappingHolder[];
+  notes: { rank: number; text: string }[];
+  known: { entity: string; ranks: number[]; debtUsd: number; approach: string | null; status: string | null; website: string | null; x: string | null }[];
+  unknown: { rank: number; address: Address; debtUsd: number; sharePct: number }[];
+  questions: string[];
+}

@@ -1,14 +1,15 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
+import type { CommunityTag, Entity, HolderDetail, LoopsResponse, MappingHolder, MappingResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
-type TabId = "loops" | "plan" | "market" | "tx" | "entities" | "data";
+type TabId = "loops" | "plan" | "mapping" | "market" | "tx" | "entities" | "data";
 const TABS: { id: TabId; label: string }[] = [
   { id: "loops", label: "Loops" },
   { id: "plan", label: "Offboarding" },
+  { id: "mapping", label: "Mapping" },
   { id: "market", label: "Market" },
   { id: "tx", label: "Last tx" },
   { id: "entities", label: "Tagged entities" },
@@ -308,6 +309,7 @@ export default function Page() {
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
         {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} onAll={() => { setPicked([]); setSel(null); }} /> : null}
+        {tab === "mapping" ? <MappingTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} /> : null}
         {tab === "market" ? <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} /> : null}
         {tab === "tx" ? (
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
@@ -1131,6 +1133,182 @@ function DataTab({ asOf }: { asOf?: string }) {
               ))}
             </div>
           ) : <p className="empty">Nothing saved yet. It fills the first time someone opens Last tx or a holder.</p>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Mapping ─────────────────────────────────────────────────────────────────
+
+const DEBT_COLORS = ["#2468fc", "#00c880", "#f2c200", "#8b5cf6", "#06b6d4", "#fb923c", "#e879f9", "#fc4434"];
+const num4 = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? DASH : n >= 100 ? fmt(n, 0) : n >= 1 ? fmt(n, 2) : n >= 0.0001 ? fmt(n, 4) : n.toPrecision(2));
+const kindLabel = (x: MappingHolder, s: string) => (x.kind === "Loop" ? `Loop · ${s}/${x.loopsAgainst}` : x.kind);
+
+function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: string) => string | undefined; onPick: (symbol: string) => void }) {
+  const asset = shown.length === 1 ? shown[0] : undefined;
+  const [data, setData] = useState<{ mapping: MappingResponse; markdown: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "loops" | "borrow" | "supply">("all");
+  const [q, setQ] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [hoverDebt, setHoverDebt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!asset) return;
+    let live = true;
+    setData(null); setError(null);
+    getJson<{ mapping: MappingResponse; markdown: string }>(`/api/mapping?asset=${asset.symbol}`).then((r) => live && setData(r)).catch((e) => live && setError(e instanceof Error ? e.message : "Failed"));
+    return () => { live = false; };
+  }, [asset]);
+
+  if (!asset) return (
+    <div className="panel">
+      <div className="panel-head"><h2>Holder mapping</h2><p className="hint">Pick an asset</p></div>
+      <div className="pick-grid">{shown.map((a) => <button key={a.symbol} className="pick-card" onClick={() => onPick(a.symbol)}><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} /> {a.symbol}</button>)}</div>
+    </div>
+  );
+  if (error) return <div className="panel"><p className="empty">Could not build the mapping: {error}</p></div>;
+  if (!data) return <div className="panel"><p className="empty">Mapping every {asset.symbol} holder: balances, debt by asset, other collateral and Spark positions… This takes a few seconds the first time.</p></div>;
+
+  const m = data.mapping, s = m.symbol;
+  const ql = q.trim().toLowerCase();
+  const rows = m.holders.filter((x) => (filter === "all" || (filter === "loops" ? x.kind === "Loop" : filter === "supply" ? x.kind === "Supply only" : x.kind.startsWith("Borrows"))) && (!ql || x.address.toLowerCase().includes(ql) || (x.tag ?? "").toLowerCase().includes(ql) || (x.ens ?? "").toLowerCase().includes(ql)));
+  const debtTotal = m.debtByAsset.reduce((t, d) => t + d.usd, 0) || 1;
+  const copy = async () => { try { await navigator.clipboard.writeText(data.markdown); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { /* blocked */ } };
+  const loopsTotal = m.loops.reduce((t, x) => t + x.debtBackedUsd, 0);
+
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-head plan-head">
+          <div>
+            <p className="eyebrow">Holder & loop breakdown · read {when(m.readAt)}</p>
+            <div className="asset-name"><AssetLogo symbol={s} src={logoOf(s)} /><a className="title-link" href={asset.etherscanUrl} target="_blank" rel="noopener noreferrer">{s}</a><span className="muted">on Aave V3 Core</span></div>
+          </div>
+          <div className="report-actions">
+            <button className="chip plain" onClick={copy}>{copied ? "Copied" : "Copy Markdown"}</button>
+            <a className="chip plain" href={`/api/mapping?asset=${s}&format=md`}>Download .md</a>
+          </div>
+        </div>
+        <div className="strip inner">
+          <Cell label={`${s} supplied`} value={fmt(m.totalSupplied)} sub={`${usd(m.totalSuppliedUsd)} · ${fmt(m.holderCount ?? m.listed)} holders`} />
+          <Cell label="Concentration" value={pct(m.top1Pct)} sub={`#1 holder · top 3 ${pct(m.top3Pct)} · top 10 ${pct(m.top10Pct)}`} />
+          <Cell label={`Holders looping ${s}`} value={fmt(m.loopers)} sub={`${pct(m.loopSharePct)} of the supply · ${m.bigLoops} above $10k`} />
+          <Cell label="Debt backed" value={usd(m.debtBackedUsd)} sub="pro rata to collateral mix" />
+          <Cell label="Loop leverage" value={m.leverageRange ? `${fmt(m.leverageRange[0], 1)}–${fmt(m.leverageRange[1], 1)}x` : DASH} sub={m.ltvRange ? `LTV ${fmt(m.ltvRange[0], 0)}–${fmt(m.ltvRange[1], 0)}%` : undefined} />
+          <Cell label="Rest of the book" value={fmt(m.othersCount)} sub={`holders, ${num4(m.othersSupplied)} ${s}`} />
+        </div>
+        <div className="body">
+          <p className="k">Debt backed by {s}, by asset</p>
+          <div className="stack-bar tall" onPointerLeave={() => setHoverDebt(null)}>
+            {m.debtByAsset.map((d, i) => <div key={d.symbol} style={{ width: `${(d.usd / debtTotal) * 100}%`, background: DEBT_COLORS[i % DEBT_COLORS.length], opacity: hoverDebt == null || hoverDebt === i ? 1 : 0.35 }} onPointerEnter={() => setHoverDebt(i)} />)}
+          </div>
+          <div className="legend">
+            {m.debtByAsset.slice(0, 8).map((d, i) => (
+              <span key={d.symbol} className={hoverDebt === i ? "on" : ""} onPointerEnter={() => setHoverDebt(i)} onPointerLeave={() => setHoverDebt(null)}>
+                <i className="sw" style={{ background: DEBT_COLORS[i % DEBT_COLORS.length] }} />{d.symbol} {num4(d.amount)} · {pct((d.usd / debtTotal) * 100)}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="two">
+        <div className="panel">
+          <div className="panel-head"><h2>Who to contact</h2><p className="hint">Known entities among the holders</p></div>
+          {m.known.length ? (
+            <ul className="findings">
+              {m.known.map((k) => (
+                <li key={k.entity}>
+                  <span className="area">{k.ranks.map((r) => `#${r}`).join(" · ")} · {usd(k.debtUsd)} of debt</span>
+                  <p><strong>{k.website ? <a className="link" href={k.website} target="_blank" rel="noopener noreferrer">{k.entity}</a> : k.entity}</strong>{k.x ? <> · <a className="link" href={k.x} target="_blank" rel="noopener noreferrer">X</a></> : null}{k.status ? ` — ${k.status}` : ""}</p>
+                  {k.approach ? <p className="step-note">Approach: {k.approach}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="empty">No tagged entity among the holders yet. Tag wallets in Tagged entities.</p>}
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>Unknown positions</h2><p className="hint">Loops above $10k with no label</p></div>
+          {m.unknown.length ? (
+            <ul className="findings">
+              {m.unknown.map((u) => (
+                <li key={u.address}><span className="area">#{u.rank} · {pct(u.sharePct)} of supply</span><p><a className="link mono" href={`https://debank.com/profile/${u.address}`} target="_blank" rel="noopener noreferrer">{short(u.address)}</a> backs {usd(u.debtUsd)}</p></li>
+              ))}
+            </ul>
+          ) : <p className="empty">Every loop above $10k carries a label.</p>}
+          {m.questions.length ? <div className="body"><p className="k">Open questions</p>{m.questions.map((x) => <p className="note" key={x}>{x}</p>)}</div> : null}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Holders</h2>
+          <p className="hint">{m.listed} holders above ${m.dustUsd} · addresses open on DeBank</p>
+        </div>
+        <div className="filters">
+          <div className="seg" role="group" aria-label="Holders shown">
+            {([["all", "All"], ["loops", `Loop ${s}`], ["borrow", "Borrow other"], ["supply", "Supply only"]] as const).map(([k, l]) => <button key={k} aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>)}
+          </div>
+          <input className="search" placeholder="Search address, tag or ENS" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="scroll positions-scroll">
+          <table className="stack mapping">
+            <thead><tr><th>#</th><th>Holder</th><th className="r">{s} supplied</th><th className="r">Share</th><th>Loops {s}?</th><th>Aave debt</th><th className="r">Health factor</th><th>Entity tag</th></tr></thead>
+            <tbody>
+              {rows.map((x) => (
+                <tr key={x.address}>
+                  <td className="muted">{x.rank}</td>
+                  <td data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a></td>
+                  <td className="r" data-label="Supplied">{num4(x.supplied)}</td>
+                  <td className="r" data-label="Share">{x.sharePct < 0.1 ? "<0.1%" : pct(x.sharePct)}</td>
+                  <td data-label="Loops?"><span className={`status ${x.kind === "Loop" ? "wait" : x.kind === "Supply only" ? "pending" : "done"}`}>{kindLabel(x, s)}</span></td>
+                  <td data-label="Debt">{x.debts.length ? x.debts.slice(0, 3).map((d) => `${num4(d.amount)} ${d.symbol}`).join(" + ") : DASH}{x.spark ? <span className="sub">+ Spark {usd(x.spark.debtUsd)}</span> : null}</td>
+                  <td className="r" data-label="HF">{x.healthFactor ? <HealthFactor value={x.healthFactor} alert={1.03} /> : DASH}</td>
+                  <td data-label="Tag">{x.tag ?? (x.ens ? <span>{x.ens}</span> : <span className="muted">{x.isContract ? x.contractName ?? "Contract" : "EOA"}</span>)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head"><h2>{m.loopers > m.loops.length / 2 ? "Loop details" : "Borrower details"}</h2><p className="hint">{m.loops.length} positions backing $10k+ · {usd(loopsTotal)} of debt</p></div>
+        <div className="scroll">
+          <table className="stack mapping">
+            <thead><tr><th>#</th><th>Holder</th><th className="r">{s} collateral, USD</th><th>Debt</th><th className="r">Debt ÷ {s}</th><th className="r">LTV</th><th className="r">Leverage</th><th className="r">Net equity</th><th className="r">Health factor</th><th className="r">Drop to liquidation</th><th className="r">Share of all Aave debt in that asset</th></tr></thead>
+            <tbody>
+              {m.loops.map((x) => (
+                <tr key={x.address}>
+                  <td className="muted">{x.rank}</td>
+                  <td className="who" data-label="Holder"><a className="link mono" href={`https://debank.com/profile/${x.address}`} target="_blank" rel="noopener noreferrer">{short(x.address)}</a><span className="sub">{x.tag ?? (x.isContract ? x.contractName ?? "Contract" : "EOA")}{x.spark ? " · also on Spark" : ""}</span></td>
+                  <td className="r" data-label="Collateral">{usd(x.suppliedUsd)}</td>
+                  <td data-label="Debt">{x.debts.slice(0, 2).map((d) => `${num4(d.amount)} ${d.symbol}`).join(" + ")}</td>
+                  <td className={`r ${x.debtPerUnit && x.debtPerUnit > 1 ? "warn" : ""}`} data-label="Debt ÷ units">{x.debtPerUnit?.toFixed(3) ?? DASH}</td>
+                  <td className="r" data-label="LTV">{pct(x.ltvPct)}</td>
+                  <td className="r" data-label="Leverage">{x.leverage ? `${fmt(x.leverage, 1)}x` : DASH}</td>
+                  <td className="r" data-label="Net equity">{usd(x.netEquityUsd)}</td>
+                  <td className="r" data-label="HF">{x.healthFactor ? <HealthFactor value={x.healthFactor} alert={1.03} /> : DASH}</td>
+                  <td className={`r ${x.dropToLiquidationPct != null && x.dropToLiquidationPct < 2 ? "bad" : ""}`} data-label="Drop to liquidation">{pct(x.dropToLiquidationPct, 2)}</td>
+                  <td className="r" data-label="Share of debt">{pct(x.shareOfDebtPct, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {m.notes.length ? (
+          <div className="body">
+            <p className="k">Notes on individual loops</p>
+            <ul className="notes-ul">{m.notes.map((n, i) => <li key={i}><strong>#{n.rank}</strong> — {n.text}</li>)}</ul>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head"><h2>Methodology & caveats</h2></div>
+        <div className="body">
+          <p className="note">Balances, debts and health factors are read on-chain from Aave V3 Core: aToken and variable-debt balances for every listed wallet, and the Pool’s getUserAccountData. Debt backed is a wallet’s debt attributed to {s} pro rata to its collateral mix. Drop to liquidation is how far {s} can fall against what is borrowed before the health factor reaches 1, other collateral held constant. Spark is checked for every position above $10k of debt. Entity tags come from the team’s tags, tags added on the site, contract names and ENS; Arkham and DeBank labels are not read automatically.</p>
         </div>
       </div>
     </>
