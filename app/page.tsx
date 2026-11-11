@@ -12,7 +12,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "tx", label: "Last tx" },
   { id: "entities", label: "Tagged entities" },
 ];
-const TX_TYPES = ["Supply", "Withdraw", "Borrow", "Repay", "Transfer", "Send", "Receive"];
+const TX_TYPES = ["Supply", "Withdraw", "Borrow", "Repay", "Liquidation", "Transfer", "Send", "Receive"];
 const BRAND = ["#2468fc", "#00c880", "#f2c200", "#fc4434", "#8b5cf6", "#06b6d4", "#fb923c", "#e879f9"];
 const DASH = "—";
 
@@ -612,7 +612,7 @@ function TxTab(props: {
     <div className="panel">
       <div className="panel-head">
         <h2>Last transactions</h2>
-        <p className="hint">Token transfers read from Blockscout, newest first</p>
+        <p className="hint">Aave actions read from the Pool contract, other transfers from Blockscout, newest first</p>
       </div>
       <div className="filters">
         <div className="seg" role="group" aria-label="Transactions shown">
