@@ -46,7 +46,7 @@ function info(token: Address) {
 }
 
 const blockTimes = new Map<bigint, Promise<string>>();
-function timeOf(block: bigint): Promise<string> {
+export function blockTime(block: bigint): Promise<string> {
   if (!blockTimes.has(block)) blockTimes.set(block, client().getBlock({ blockNumber: block }).then((b) => new Date(Number(b.timestamp) * 1000).toISOString()));
   return blockTimes.get(block)!;
 }
@@ -62,11 +62,13 @@ let maxSpan: number | null = RANGE > 0 ? RANGE : null;
 
 class SpanTooWide extends Error {}
 
-async function rawLogs(from: bigint, to: bigint, topics: (`0x${string}` | `0x${string}`[] | null)[]): Promise<any[]> {
+type Topics = (`0x${string}` | `0x${string}`[] | null)[];
+
+async function rawLogs(from: bigint, to: bigint, topics: Topics, address: Address = AAVE_V3_CORE.pool): Promise<any[]> {
   try {
     return await client().request({
       method: "eth_getLogs",
-      params: [{ address: AAVE_V3_CORE.pool, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics }],
+      params: [{ address, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics }],
     } as any) as any[];
   } catch (e) {
     const msg = e instanceof Error ? `${e.message} ${(e as any).details ?? ""}` : String(e);
@@ -100,6 +102,25 @@ async function logsIn(f: Filter, from: bigint, to: bigint): Promise<any[]> {
   }
 }
 
+/** Raw logs of any contract over a span, split the same way when the provider refuses it. */
+export async function logsSplit(address: Address, topics: Topics, from: bigint, to: bigint): Promise<any[]> {
+  const span = BigInt(maxSpan ?? Number(to - from + 1n));
+  const parts: [bigint, bigint][] = [];
+  for (let s = from; s <= to; s += span) parts.push([s, s + span - 1n > to ? to : s + span - 1n]);
+  const one = async (a: bigint, b: bigint): Promise<any[]> => {
+    try { return await rawLogs(a, b, topics, address); } catch (e) {
+      if (!(e instanceof SpanTooWide) || b - a < 10n) throw e;
+      const s2 = maxSpan && maxSpan < Number(b - a + 1n) ? BigInt(maxSpan) : (b - a + 1n) / 2n;
+      const sub: [bigint, bigint][] = [];
+      for (let s = a; s <= b; s += s2) sub.push([s, s + s2 - 1n > b ? b : s + s2 - 1n]);
+      return (await pooled(sub.map(([x, y]) => () => one(x, y)), 4)).flat();
+    }
+  };
+  return (await pooled(parts.map(([a, b]) => () => one(a, b)), 4)).flat();
+}
+
+export const padTopic = pad;
+
 /** Runs tasks with at most `n` at a time. */
 async function pooled<T>(tasks: (() => Promise<T>)[], n: number): Promise<T[]> {
   const out: T[] = new Array(tasks.length);
@@ -112,7 +133,7 @@ async function pooled<T>(tasks: (() => Promise<T>)[], n: number): Promise<T[]> {
 
 async function toEvent(l: any): Promise<AaveEvent> {
   const a = l.args;
-  const base = { txHash: l.transactionHash, logIndex: Number(l.logIndex), block: Number(l.blockNumber), timestamp: await timeOf(BigInt(l.blockNumber)) };
+  const base = { txHash: l.transactionHash, logIndex: Number(l.logIndex), block: Number(l.blockNumber), timestamp: await blockTime(BigInt(l.blockNumber)) };
   if (l.eventName === "LiquidationCall") {
     const [debt, coll] = await Promise.all([info(a.debtAsset), info(a.collateralAsset)]);
     return { ...base, action: "Liquidation", wallet: a.user, counterparty: a.liquidator, reserve: a.debtAsset, symbol: debt.symbol,

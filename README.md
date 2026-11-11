@@ -5,6 +5,7 @@ Tracks leveraged loop positions on Aave V3 Core. Figures are read when the page 
 | Tab | What it shows | Where it comes from |
 |---|---|---|
 | Loops | Top holders per asset: supplied, debt, leverage, health factor, liquidations. Select a row for the holder's identity and last transactions. | Blockscout (holder list, labels) + RPC (balances, `getUserAccountData`) + TokenLogic API (liquidations) |
+| Offboarding | Progress of the rsETH offboarding against the plan (LlamaRisk, 2 Nov 2026): debt repaid since the baseline, daily history, plan steps ticked from on-chain changes, triggers, and whether each loop still earns at today's rates, +50 and +100 bps. | RPC (past balances, oracle, Pool rates, Pool Configurator events) + `config/plan.ts` for the plan's own figures |
 | Market | Supply, price, rates, utilization, debt against it, concentration, reserve status and caps. | TokenLogic API (reserve data, rates), checked against RPC (aToken supply, Aave oracle, Pool configuration) |
 | Last tx | Aave actions (Supply, Withdraw, Borrow, Repay, Liquidation) and other token transfers, market-wide and per holder. | Aave Pool events via RPC; liquidations also from the TokenLogic API; other transfers from Blockscout |
 | Tagged entities | Tags anyone with access adds on the site (name, reasoning, links), then the team's entities and tagged addresses. | Shared storage (Upstash Redis) + `/data/*.json` |
@@ -33,6 +34,7 @@ With `SITE_PASSWORD` set, the site asks for it through the browser's sign-in pro
 
 | I want to… | Edit |
 |---|---|
+| Track another asset's offboarding | `config/plan.ts`: baseline, steps, triggers. |
 | Add an asset | `config/assets.ts`: add `{ symbol, underlying }`. Add a logo at `public/assets/<symbol>.png` (optional). |
 | Track more or fewer holders | `TOP_HOLDERS` in `config/assets.ts` |
 | Change the alert level | `HF_ALERT` in `config/assets.ts` |

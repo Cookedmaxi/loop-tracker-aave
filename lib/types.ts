@@ -115,3 +115,34 @@ export interface CommunityTag {
   author: string;
   createdAt: string;
 }
+
+// ── Offboarding tab ─────────────────────────────────────────────────────────
+
+export interface PlanDay { date: string; block: number; supplied: number; debt: number; debtUsd: number; rate: number }
+
+export interface PlanChange {
+  block: number; timestamp: string; txHash: string;
+  asset: string;            // symbol, or "E-Mode"
+  kind: string;             // event name
+  text: string;             // in words
+  values: (string | number | boolean)[];
+}
+
+export interface PlanResponse {
+  symbol: string; debtSymbol: string; title: string; source: string;
+  resolution: string; path: "rate" | "lt"; pathLabel: string;
+  notes: string[]; warnings: string[];
+  baseline: { date: string; collateralUsd: number; debtUsd: number; debtTokens: number | null; supplied: number | null; block: number | null };
+  now: { debt: number; debtUsd: number; supplied: number; positions: number; asOf: string };
+  history: PlanDay[];
+  triggers: { label: string; rule: string; debtBelowUsd: number; met: boolean }[];
+  steps: { month: number; label: string; condition: string | null; doneAt: string | null; txHash: string | null }[];
+  monthRule: { startedAt: string; due: string; startDebt: number | null; fellPct: number | null; secondStepNeeded: boolean | null } | null;
+  carry: {
+    yieldPct: number | null; borrowPct: number; borrowAvg30Pct: number | null; reserveFactorPct: number; exchangeRate: number;
+    planYieldPct: number; planBorrowPct: number; planBreakevenBps: number;
+    avgLeverage: number | null; roe: { bps: number; pct: number | null }[]; breakevenBps: number | null;
+    positions: { address: Address; rank: number; label: string | null; leverage: number | null; debtUsd: number; roe: { bps: number; pct: number | null }[]; breakevenBps: number | null }[];
+  } | null;
+  changes: PlanChange[];
+}

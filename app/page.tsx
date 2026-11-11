@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, Position, Tag, Tx } from "@/lib/types";
+import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, PlanResponse, Position, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
-type TabId = "loops" | "market" | "tx" | "entities" | "data";
+type TabId = "loops" | "plan" | "market" | "tx" | "entities" | "data";
 const TABS: { id: TabId; label: string }[] = [
   { id: "loops", label: "Loops" },
+  { id: "plan", label: "Offboarding" },
   { id: "market", label: "Market" },
   { id: "tx", label: "Last tx" },
   { id: "entities", label: "Tagged entities" },
@@ -288,6 +289,7 @@ export default function Page() {
           <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community}
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
+        {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} /> : null}
         {tab === "market" ? <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} /> : null}
         {tab === "tx" ? (
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
@@ -556,6 +558,236 @@ function HolderTx({ row, rows, error, colors }: { row: Row; rows: Tx[] | null; e
   );
 }
 
+// ── Offboarding ─────────────────────────────────────────────────────────────
+
+const signed = (n: number | null | undefined, digits = 1) => (n == null || !Number.isFinite(n) ? DASH : `${n > 0 ? "+" : ""}${fmt(n, digits)}%`);
+const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+function useNarrow(query = "(max-width: 700px)") {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = () => setNarrow(m.matches);
+    on(); m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, [query]);
+  return narrow;
+}
+
+function DebtChart({ plan }: { plan: PlanResponse }) {
+  const narrow = useNarrow();
+  const pts = plan.history;
+  if (pts.length < 2) return <p className="empty">The daily history fills in once the RPC serves past blocks.</p>;
+  // Drawn at the size it is shown, so labels stay readable on a phone.
+  const W = narrow ? 340 : 640, H = narrow ? 220 : 230, L = narrow ? 40 : 52, R = 10, T = 16, B = 28;
+  const price = plan.now.debt > 0 ? plan.now.debtUsd / plan.now.debt : 0;
+  const trig = plan.triggers[0] && price ? plan.triggers[0].debtBelowUsd / price : null;
+  const max = Math.max(...pts.map((p) => p.debt), plan.now.debt) * 1.08;
+  const x = (i: number) => L + (i / (pts.length - 1)) * (W - L - R);
+  const y = (v: number) => T + (1 - v / max) * (H - T - B);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.debt).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(pts.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+  const bi = pts.findIndex((p) => p.date === plan.baseline.date);
+  const ticks = [0, 0.5, 1].map((f) => f * max / 1.08);
+  const k = (v: number) => (v >= 1000 ? `${fmt(v / 1000, 0)}k` : fmt(v, 0));
+  const last = pts[pts.length - 1];
+  return (
+    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${plan.debtSymbol} debt of the tracked loops, daily`}>
+      <defs>
+        <linearGradient id="debt-fill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="#2468fc" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#2468fc" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {ticks.map((v) => (
+        <g key={v}>
+          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" />
+          <text x={L - 8} y={y(v) + 4} textAnchor="end" className="axis">{k(v)}</text>
+        </g>
+      ))}
+      <path d={area} className="area" />
+      <path d={line} className="line" />
+      {bi >= 0 ? (
+        <g>
+          <line x1={x(bi)} x2={x(bi)} y1={T} y2={y(0)} className="mark" />
+          <text x={x(bi) + (narrow ? -6 : 6)} y={T + 10} textAnchor={narrow ? "end" : "start"} className="axis strong">{narrow ? "Baseline" : "Plan baseline"} · {dayLabel(plan.baseline.date)}</text>
+          <circle cx={x(bi)} cy={y(pts[bi].debt)} r={3.5} className="dot-base" />
+        </g>
+      ) : null}
+      {trig && trig < max ? (
+        <g>
+          <line x1={L} x2={W - R} y1={y(trig)} y2={y(trig)} className="trigger" />
+          <text x={W - R} y={y(trig) - 6} textAnchor="end" className="axis warn">{narrow ? "E-Mode cuts" : plan.triggers[0].label} · {usd(plan.triggers[0].debtBelowUsd)}</text>
+        </g>
+      ) : null}
+      <circle cx={x(pts.length - 1)} cy={y(last.debt)} r={4} className="dot-now" />
+      <text x={L} y={H - 8} className="axis">{dayLabel(pts[0].date)}</text>
+      <text x={W - R} y={H - 8} textAnchor="end" className="axis">{dayLabel(last.date)}</text>
+    </svg>
+  );
+}
+
+function StepStatus({ s }: { s: PlanResponse["steps"][number] }) {
+  if (s.doneAt) return <span className="status done">Done{s.doneAt !== "before tracking" ? ` · ${dayLabel(s.doneAt.slice(0, 10))}` : ""}</span>;
+  if (s.condition) return <span className="status wait">Conditional</span>;
+  return <span className="status pending">Pending</span>;
+}
+
+function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => string | undefined }) {
+  const asset = shown[0];
+  const [plan, setPlan] = useState<PlanResponse | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!asset) return;
+    let live = true;
+    const load = () => getJson<{ plan: PlanResponse | null }>(`/api/plan?asset=${asset.symbol}`).then((r) => live && (setPlan(r.plan), setError(null))).catch((e) => live && setError(e instanceof Error ? e.message : "Failed"));
+    setPlan(undefined); load();
+    const id = window.setInterval(() => document.visibilityState === "visible" && load(), 60_000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [asset]);
+
+  if (!asset) return <div className="panel"><p className="empty">Pick an asset.</p></div>;
+  if (error) return <div className="panel"><p className="empty">Could not read the plan: {error}</p></div>;
+  if (plan === undefined) return <div className="panel"><p className="empty">Reading {asset.symbol}’s offboarding progress from the chain… The first visit backfills the daily history.</p></div>;
+  if (plan === null) return <div className="panel"><p className="empty">No offboarding plan is set for {asset.symbol}. Add one in config/plan.ts.</p></div>;
+
+  const b = plan.baseline, n = plan.now, c = plan.carry;
+  const repaidPct = b.debtTokens ? (1 - n.debt / b.debtTokens) * 100 : null;
+  const supplyPct = b.supplied ? (n.supplied / b.supplied - 1) * 100 : null;
+  const roeNow = c?.roe[0]?.pct ?? null;
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-head plan-head">
+          <div>
+            <p className="eyebrow">{plan.title}</p>
+            <div className="asset-name">
+              <AssetLogo symbol={asset.symbol} src={logoOf(asset.symbol)} />
+              <a className="title-link" href={asset.etherscanUrl} target="_blank" rel="noopener noreferrer">{asset.symbol}</a>
+              <span className="pill">{plan.resolution}</span><span className="pill ghost">{plan.pathLabel}</span>
+            </div>
+          </div>
+          <p className="hint">Plan figures: {plan.source}. Everything else is read on-chain.</p>
+        </div>
+        <div className="strip inner">
+          <Cell label={`${plan.debtSymbol} debt backed`} value={fmt(n.debt)} sub={`${usd(n.debtUsd)} · ${n.positions} loops`} />
+          <Cell label={`Repaid since ${dayLabel(b.date)}`} value={pct(repaidPct)} tone={repaidPct && repaidPct > 0 ? "pos" : ""} sub={b.debtTokens ? `from ${fmt(b.debtTokens)} ${plan.debtSymbol} · plan ${usd(b.debtUsd)}` : `plan ${usd(b.debtUsd)}`} />
+          <Cell label={`${plan.symbol} supplied`} value={fmt(n.supplied)} sub={supplyPct != null ? `${signed(supplyPct)} since ${dayLabel(b.date)}` : undefined} />
+          <Cell label="Loop return on equity" value={signed(roeNow)} tone={roeNow == null ? "" : roeNow > 0 ? "warn" : "pos"} sub={c?.avgLeverage ? `at ${fmt(c.avgLeverage, 1)}x, today’s rates` : undefined} />
+          <Cell label="Rate rise that ends the carry" value={c?.breakevenBps != null ? `+${c.breakevenBps} bps` : DASH} sub={`plan: about +${c?.planBreakevenBps ?? DASH} bps`} />
+        </div>
+      </div>
+
+      <div className="split">
+        <div className="panel">
+          <div className="panel-head">
+            <h2>{plan.debtSymbol} debt of the loops, daily</h2>
+            <p className="hint">Tracked loop positions, 00:00 UTC each day</p>
+          </div>
+          <div className="body">
+            <DebtChart plan={plan} />
+            {plan.triggers.map((t) => {
+              const progress = Math.max(0, Math.min(1, b.debtUsd > t.debtBelowUsd ? (b.debtUsd - n.debtUsd) / (b.debtUsd - t.debtBelowUsd) : 1));
+              return (
+                <div className="trigger-box" key={t.label}>
+                  <div className="kv"><span>{t.label}</span><span className={t.met ? "pos" : ""}>{t.met ? "Reached" : `${usd(n.debtUsd)} to go below ${usd(t.debtBelowUsd)}`}</span></div>
+                  <div className="track"><div style={{ width: `${progress * 100}%` }} /></div>
+                  <p className="step-note">{t.rule} · {fmt(progress * 100, 0)}% of the way from the plan baseline</p>
+                </div>
+              );
+            })}
+            <p className="note">Wallets that left the top holders before today are not counted in past days, so earlier days slightly understate the debt.</p>
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><h2>Plan steps</h2><p className="hint">Checked against on-chain changes</p></div>
+          <ol className="steps">
+            {plan.steps.map((s, i) => (
+              <li key={i}>
+                <span className="when">Month {s.month}</span>
+                <div>
+                  <p>{s.label}</p>
+                  {s.condition === "loop-debt-fell-less-than-25pct" ? (
+                    <p className="step-note">Only if loop debt fell less than 25% in the month after the first rate step.
+                      {plan.monthRule ? ` So far: ${pct(plan.monthRule.fellPct)} lower, decided ${dayLabel(plan.monthRule.due.slice(0, 10))} → ${plan.monthRule.secondStepNeeded ? "second step needed" : "second step not needed"}.` : " Starts when the first rate step executes."}
+                    </p>
+                  ) : null}
+                  {s.txHash ? <a className="link mono step-tx" href={`https://etherscan.io/tx/${s.txHash}`} target="_blank" rel="noopener noreferrer">{s.txHash.slice(0, 10)}…</a> : null}
+                </div>
+                <StepStatus s={s} />
+              </li>
+            ))}
+          </ol>
+          <div className="body">
+            {plan.notes.map((x) => <p className="note" key={x}>{x}</p>)}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Do the loops still pay?</h2>
+          <p className="hint">Return on equity = leverage × {plan.symbol} yield − (leverage − 1) × {plan.debtSymbol} borrow rate</p>
+        </div>
+        {c ? (
+          <>
+            <div className="strip inner">
+              <Cell label={`${plan.symbol} yield, 30 days`} value={pct(c.yieldPct, 2)} sub={`exchange rate growth · plan ${pct(c.planYieldPct, 2)}`} />
+              <Cell label={`${plan.debtSymbol} borrow rate`} value={pct(c.borrowPct, 2)} sub={`30-day average ${pct(c.borrowAvg30Pct, 2)} · plan ${pct(c.planBorrowPct, 2)}`} />
+              <Cell label="Spread" value={signed(c.yieldPct != null ? c.yieldPct - c.borrowPct : null, 2)} sub="yield minus borrow rate" />
+              <Cell label={`${plan.debtSymbol} reserve factor`} value={pct(c.reserveFactorPct, 0)} sub="plan: 32% at step 1, 43% at step 2" />
+            </div>
+            <div className="scroll">
+              <table className="stack carry">
+                <thead>
+                  <tr><th>Position</th><th className="r">Leverage</th><th className="r">{plan.debtSymbol} debt</th>{c.roe.map((r) => <th className="r" key={r.bps}>{r.bps ? `ROE at +${r.bps} bps` : "ROE today"}</th>)}<th className="r">Turns negative at</th></tr>
+                </thead>
+                <tbody>
+                  <tr className="total">
+                    <td>All loops</td>
+                    <td className="r" data-label="Leverage">{c.avgLeverage ? `${fmt(c.avgLeverage, 1)}x` : DASH}</td>
+                    <td className="r" data-label="Debt">{usd(n.debtUsd)}</td>
+                    {c.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
+                    <td className="r" data-label="Negative at">{c.breakevenBps != null ? `+${c.breakevenBps} bps` : DASH}</td>
+                  </tr>
+                  {c.positions.map((p) => (
+                    <tr key={p.address}>
+                      <td className="who">#{p.rank} {p.label ?? short(p.address)}<span className="sub"><Addr address={p.address} /></span></td>
+                      <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
+                      <td className="r" data-label="Debt">{usd(p.debtUsd)}</td>
+                      {p.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
+                      <td className="r" data-label="Negative at">{p.breakevenBps != null ? `+${p.breakevenBps} bps` : DASH}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="note pad">Amber: the loop still earns, so the holder has no reason to unwind. Green: the loop loses money and should unwind. Leverage is account-wide, from Aave. Rates are annual, before gas and the cost of unwinding through Kelp’s withdrawal queue.</p>
+          </>
+        ) : <p className="empty">Rates could not be read from the chain.</p>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head"><h2>Parameter changes on-chain</h2><p className="hint">{plan.symbol}, {plan.debtSymbol} and E-Mode changes from the Aave Pool Configurator, since 22 October</p></div>
+        {plan.changes.length ? (
+          <ul className="changes">
+            {plan.changes.map((ch) => (
+              <li key={`${ch.txHash}:${ch.text}`}>
+                <span className="when">{when(ch.timestamp)}</span>
+                <span className="what">{ch.text}</span>
+                <a className="link mono" href={`https://etherscan.io/tx/${ch.txHash}`} target="_blank" rel="noopener noreferrer">{ch.txHash.slice(0, 10)}…</a>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="empty">No change since 22 October. The first rate step will appear here, and the plan step above will tick, the moment it executes.</p>}
+      </div>
+
+      {plan.warnings.length ? <div className="panel"><div className="body">{plan.warnings.map((w) => <p className="note warn" key={w}>{w}</p>)}</div></div> : null}
+    </>
+  );
+}
+
 // ── Data ────────────────────────────────────────────────────────────────────
 
 interface Status {
@@ -582,6 +814,8 @@ const SOURCES: [string, string][] = [
   ["Contract name, ENS, deployer, public labels", "Blockscout"],
   ["Team tags and notes", "The repository (data/*.json)"],
   ["Tags added on the site", "Shared storage (Upstash)"],
+  ["Offboarding: daily debt history, collateral yield, borrow rate", "Ethereum RPC (past balances and oracle prices, Pool reserve data)"],
+  ["Offboarding: plan steps and parameter changes", "Ethereum RPC: Aave Pool Configurator events; plan figures from config/plan.ts"],
 ];
 
 function DataTab({ asOf }: { asOf?: string }) {
