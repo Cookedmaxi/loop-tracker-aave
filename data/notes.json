@@ -1,0 +1,8 @@
+[
+  { "match": "0xCDfA7EfE670869c6b6be4375654E0b206eF49c89", "source": "On-chain", "finding": "Contract is a Subvault (creator 0xe98b…95a3). The Lido Earn migration doc lists this address as the subvault holding the rsETH loop.", "linkedEntity": "Lido Earn", "confidence": "Confirmed", "date": "2026-11-08" },
+  { "match": "0xf746…3010", "source": "On-chain", "finding": "Also leveraged on Aave V4 and Aave V3 Arbitrum. Maybe related to Kelp; to confirm with Kelp.", "linkedEntity": "Kelp", "confidence": "Possible", "date": "2026-11-08" },
+  { "match": "0x8CB0…0f6E", "source": "On-chain", "finding": "Contract is StrategyAAVEV3RsETH_ETH (creator 0xd6cf…cc59): a dedicated rsETH yield strategy. Operator still to confirm.", "linkedEntity": "CIAN", "confidence": "Probable", "date": "2026-11-08" },
+  { "match": "0xdE53…eC99", "source": "On-chain", "finding": "Safe attributed to Aleph in the Aleph analysis.", "linkedEntity": "Aleph", "confidence": "Probable", "date": "2026-11-08" },
+  { "match": "0xEec0…42CA", "source": "X", "finding": "Second Safe attributed to Aleph (x.com/AlephFi) in the Aleph 2 analysis.", "linkedEntity": "Aleph", "confidence": "Probable", "date": "2026-11-08" },
+  { "match": "0xa946…fc40", "source": "On-chain", "finding": "ImmutableBeaconProxy smart account used by Contango. The position belongs to a Contango user who is not identified.", "linkedEntity": "Contango user", "confidence": "Probable", "date": "2026-11-08" }
+]
