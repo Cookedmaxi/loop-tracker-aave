@@ -349,9 +349,8 @@ function LoopsTab(props: {
         );
       })}
 
-      <div className="split loops-layout">
-        <div className="col">
-        <div className="panel o-positions">
+      <div className="master">
+        <div className="panel master-list">
           <div className="panel-head">
             <h2>Positions</h2>
             <p className="hint">{scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
@@ -399,15 +398,14 @@ function LoopsTab(props: {
           {scan?.capped ? <p className="note warn pad">Holder scan hit its cap of {fmt(scan.scanned)} wallets; positions below that are not counted. Raise MAX_HOLDERS_SCANNED in config/assets.ts.</p> : null}
         </div>
 
-        {current ? <div className="o-tx"><HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /></div> : null}
-        <div className="o-liq"><Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} /></div>
-        </div>
-
-        <div className="col side-sticky">
-          {current ? <div className="o-card"><PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /></div> : null}
-          {current ? <div className="o-id"><HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /></div> : null}
+        <div className="master-detail">
+          {current ? <PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /> : null}
+          {current ? <HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /> : null}
         </div>
       </div>
+
+      {current ? <HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /> : null}
+      <Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} />
 
       <p className="note">
         Health factor, leverage and the drop to liquidation come from Aave for the whole wallet: every collateral and every debt it holds on {shown.length ? loops[shown[0].symbol]?.market.venue ?? "Aave" : "Aave"}, not only this asset.
