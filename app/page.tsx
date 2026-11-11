@@ -1193,9 +1193,9 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
         <div className="strip inner">
           <Cell label={`${s} supplied`} value={fmt(m.totalSupplied)} sub={`${usd(m.totalSuppliedUsd)} · ${fmt(m.holderCount ?? m.listed)} holders`} />
           <Cell label="Concentration" value={pct(m.top1Pct)} sub={`#1 holder · top 3 ${pct(m.top3Pct)} · top 10 ${pct(m.top10Pct)}`} />
-          <Cell label={`Holders looping ${s}`} value={fmt(m.loopers)} sub={`${pct(m.loopSharePct)} of the supply · ${m.bigLoops} above $10k`} />
+          <Cell label={m.analytics.mode === "loop" ? `Holders looping ${s}` : `Holders borrowing against ${s}`} value={fmt(m.loopers)} sub={`${pct(m.loopSharePct)} of the supply · ${m.bigLoops} above $10k`} />
           <Cell label="Debt backed" value={usd(m.debtBackedUsd)} sub="pro rata to collateral mix" />
-          <Cell label="Loop leverage" value={m.leverageRange ? `${fmt(m.leverageRange[0], 1)}–${fmt(m.leverageRange[1], 1)}x` : DASH} sub={m.ltvRange ? `LTV ${fmt(m.ltvRange[0], 0)}–${fmt(m.ltvRange[1], 0)}%` : undefined} />
+          <Cell label={m.analytics.mode === "loop" ? "Loop leverage" : "Leverage"} value={m.leverageRange ? `${fmt(m.leverageRange[0], 1)}–${fmt(m.leverageRange[1], 1)}x` : DASH} sub={m.ltvRange ? `LTV ${fmt(m.ltvRange[0], 0)}–${fmt(m.ltvRange[1], 0)}%` : undefined} />
           <Cell label="Rest of the book" value={fmt(m.othersCount)} sub={`holders, ${num4(m.othersSupplied)} ${s}`} />
         </div>
         <div className="body">
@@ -1213,6 +1213,8 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
         </div>
       </div>
 
+      <MappingRisk m={m} />
+
       <div className="two">
         <div className="panel">
           <div className="panel-head"><h2>Who to contact</h2><p className="hint">Known entities among the holders</p></div>
@@ -1229,7 +1231,7 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
           ) : <p className="empty">No tagged entity among the holders yet. Tag wallets in Tagged entities.</p>}
         </div>
         <div className="panel">
-          <div className="panel-head"><h2>Unknown positions</h2><p className="hint">Loops above $10k with no label</p></div>
+          <div className="panel-head"><h2>Unknown positions</h2><p className="hint">{m.analytics.mode === "loop" ? "Loops" : "Positions"} above $10k with no label</p></div>
           {m.unknown.length ? (
             <ul className="findings">
               {m.unknown.map((u) => (
@@ -1274,7 +1276,7 @@ function MappingTab({ shown, logoOf, onPick }: { shown: Shown; logoOf: (s: strin
       </div>
 
       <div className="panel">
-        <div className="panel-head"><h2>{m.loopers > m.loops.length / 2 ? "Loop details" : "Borrower details"}</h2><p className="hint">{m.loops.length} positions backing $10k+ · {usd(loopsTotal)} of debt</p></div>
+        <div className="panel-head"><h2>{m.analytics.mode === "loop" ? "Loop details" : "Borrower details"}</h2><p className="hint">{m.loops.length} positions backing $10k+ · {usd(loopsTotal)} of debt</p></div>
         <div className="scroll">
           <table className="stack mapping">
             <thead><tr><th>#</th><th>Holder</th><th className="r">{s} collateral, USD</th><th>Debt</th><th className="r">Debt ÷ {s}</th><th className="r">LTV</th><th className="r">Leverage</th><th className="r">Net equity</th><th className="r">Health factor</th><th className="r">Drop to liquidation</th><th className="r">Share of all Aave debt in that asset</th></tr></thead>
@@ -1813,6 +1815,57 @@ function CommunityPanel({ positions, entities, tags, error, colors, onChange }: 
               ))}
             </div>
           ) : <p className="empty">No tag yet. The first one you add shows here for everyone.</p>}
+      </div>
+    </div>
+  );
+}
+
+
+function MappingRisk({ m }: { m: MappingResponse }) {
+  const a = m.analytics;
+  const s = m.symbol;
+  const [hover, setHover] = useState<number | null>(null);
+  const total = m.loops.reduce((x, l) => x + l.debtBackedUsd, 0) || 1;
+  const maxHf = Math.max(1, ...a.hfBuckets.map((b) => b.debtUsd));
+  const what = a.mode === "loop" ? `${s}/${m.loops[0]?.loopsAgainst ?? "debt"} exchange rate` : `${s} price`;
+  const h = hover != null ? a.ladder[hover] : null;
+  return (
+    <div className="panel">
+      <div className="panel-head"><h2>Liquidation and concentration</h2><p className="hint">{m.loops.length} positions backing $10k+ · other collateral held constant</p></div>
+      <div className="strip inner">
+        <Cell label="Debt-weighted HF" value={a.weightedHf ? a.weightedHf.toFixed(3) : DASH} sub="across positions above $10k" />
+        <Cell label="Largest position" value={pct(a.debtTop1Pct)} sub={`of debt · top 3 ${pct(a.debtTop3Pct)} · top 10 ${pct(a.debtTop10Pct)}`} />
+        <Cell label="80% of the debt" value={`${a.positionsFor80Pct} positions`} sub={`HHI ${Math.round(a.hhi).toLocaleString("en-US")}${a.hhi > 2500 ? " · highly concentrated" : a.hhi > 1500 ? " · concentrated" : ""}`} />
+        <Cell label="Held by contracts" value={pct(a.contractDebtPct)} sub="of the debt (Safes, vaults, proxies)" />
+        <Cell label="Identified" value={pct(a.identifiedDebtPct)} sub="of the debt has an entity tag" />
+        <Cell label="Also on Spark" value={a.sparkPositions ? usd(a.sparkDebtUsd) : DASH} sub={`$${a.sparkPositions} position${a.sparkPositions === 1 ? "" : "s"} with Spark debt`} />
+      </div>
+      <div className="two-inner">
+        <div className="body">
+          <p className="k">Debt liquidated if the {what} falls by…</p>
+          <div className="ladder" onPointerLeave={() => setHover(null)}>
+            {a.ladder.map((l, i) => (
+              <div key={l.dropPct} className={`rung${hover === i ? " on" : ""}`} onPointerEnter={() => setHover(i)}>
+                <span className="lab">−{l.dropPct}%</span>
+                <span className="lbar"><i style={{ width: `${(l.debtUsd / total) * 100}%` }} /></span>
+                <span className="val">{l.debtUsd ? usd(l.debtUsd) : DASH}</span>
+              </div>
+            ))}
+          </div>
+          <p className="note">{h ? `At −${h.dropPct}%: ${h.positions} positions, ${usd(h.debtUsd)} of debt (${pct((h.debtUsd / total) * 100)}) and ${usd(h.collateralUsd)} of ${s} collateral become liquidatable.` : `Hover a row. ${a.mode === "loop" ? "Loops are exposed to the exchange rate, not the ETH price: a depeg or an oracle cut is what liquidates them." : "Borrowers are exposed to the price; an LT cut of d points acts like a fall of about d/LT."}`}</p>
+        </div>
+        <div className="body">
+          <p className="k">Debt by health factor</p>
+          <div className="ladder">
+            {a.hfBuckets.map((b, i) => (
+              <div key={b.label} className="rung">
+                <span className="lab">{b.label}</span>
+                <span className="lbar"><i className={i < 2 ? "bad" : i < 3 ? "warn" : "ok"} style={{ width: `${(b.debtUsd / maxHf) * 100}%` }} /></span>
+                <span className="val">{b.debtUsd ? `${usd(b.debtUsd)} · ${b.positions}` : DASH}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -19,12 +19,20 @@ export function mappingMarkdown(m: MappingResponse): string {
   const s = m.symbol;
   L.push(`# ${s} on Aave V3 Core — Holder & Loop Breakdown`, "", `${day(m.readAt)} · Loop Tracker`, "");
   L.push("## Summary", "");
-  L.push(`The ${s} market on Aave V3 Core: ${m.loopers} of ${m.listed} listed holders loop ${s}, holding ${pct(m.loopSharePct)} of the supply; together the holders back ${usd(m.debtBackedUsd)} of debt.`, "");
+  L.push(`The ${s} market on Aave V3 Core: ${m.loopers} of ${m.listed} listed holders ${m.analytics.mode === "loop" ? "loop" : "borrow against"} ${s}, holding ${pct(m.loopSharePct)} of the supply; together the holders back ${usd(m.debtBackedUsd)} of debt.`, "");
   L.push(`- **Total supplied:** ${num(m.totalSupplied)} ${s} (≈ ${usd(m.totalSuppliedUsd)} at $${m.priceUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}), across ${m.holderCount ?? m.listed} holders.`);
   L.push(`- **Concentration:** the #1 holder holds ${pct(m.top1Pct)} of the market; the top 3 hold ${pct(m.top3Pct)} and the top 10 ${pct(m.top10Pct)}.`);
   L.push(`- **Debt backed:** ${m.debtByAsset.slice(0, 5).map((d) => `${num(d.amount)} ${d.symbol}`).join(", ")} (pro rata to each wallet's collateral mix).`);
   if (m.leverageRange) L.push(`- **Looping:** ${m.bigLoops} loops above $10k of debt, at ${m.leverageRange[0].toFixed(1)}–${m.leverageRange[1].toFixed(1)}x leverage and ${m.ltvRange ? `${m.ltvRange[0].toFixed(0)}–${m.ltvRange[1].toFixed(0)}%` : "—"} LTV.`);
-  L.push(`- **Rest of the book:** ${m.othersCount} holders that do not loop hold ${num(m.othersSupplied)} ${s}; they supply only or borrow other assets against it.`, "");
+  {
+    const a = m.analytics;
+    L.push(`- **Concentration of debt:** the largest position backs ${pct(a.debtTop1Pct)}, the top 3 ${pct(a.debtTop3Pct)}; ${a.positionsFor80Pct} positions make up 80% (HHI ${Math.round(a.hhi)}).`);
+    if (a.weightedHf) L.push(`- **Debt-weighted health factor:** ${a.weightedHf.toFixed(3)}. ${pct(a.contractDebtPct)} of the debt sits in contracts; ${pct(a.identifiedDebtPct)} is identified.`);
+    const rungs = a.ladder.filter((l) => [2, 5, 10, 20].includes(l.dropPct)).map((l) => `−${l.dropPct}%: ${usd(l.debtUsd)} (${l.positions})`).join(" · ");
+    L.push(`- **Liquidation ladder (${a.mode === "loop" ? "exchange rate" : "price"}):** ${rungs}.`);
+    if (a.sparkPositions) L.push(`- **Also on Spark:** ${a.sparkPositions} positions with ${usd(a.sparkDebtUsd)} of Spark debt.`);
+  }
+  L.push(`- **Rest of the book:** ${m.othersCount} holders that do not ${m.analytics.mode === "loop" ? "loop" : "borrow"} hold ${num(m.othersSupplied)} ${s}; they supply only or borrow other assets against it.`, "");
   if (m.known.length || m.unknown.length) {
     L.push("**Known holders, contact directly:**", "");
     for (const k of m.known) L.push(`- ${k.website ? `[${k.entity}](${k.website})` : k.entity}${k.x ? ` ([X](${k.x}))` : ""} — ${k.ranks.map((r) => `#${r}`).join(", ")}, ${usd(k.debtUsd)} of debt${k.status ? `. ${k.status}` : ""}${k.approach ? ` Approach: ${k.approach}.` : ""}`);
@@ -35,7 +43,7 @@ export function mappingMarkdown(m: MappingResponse): string {
   L.push(`${m.listed} holders above $${m.dustUsd} are listed. Links open each wallet on DeBank.`, "");
   L.push(`| # | Holder (DeBank) | ${s} supplied | Share | Loops ${s}? | Aave debt | Health factor | Entity tag |`, "| --- | --- | ---: | ---: | --- | --- | ---: | --- |");
   for (const x of m.holders) L.push(`| ${x.rank} | ${debank(x.address)} | ${num(x.supplied)} | ${pct(x.sharePct)} | ${loopCell(x, s)} | ${debtCell(x)} | ${x.healthFactor ? x.healthFactor.toFixed(3) : "—"} | ${tagCell(x)} |`);
-  L.push("", `## ${m.loopers > m.loops.length / 2 ? "Loop details" : "Borrower details"}`, "");
+  L.push("", `## ${m.analytics.mode === "loop" ? "Loop details" : "Borrower details"}`, "");
   L.push(`Every position backing $10k or more of debt (${m.loops.length}).`, "");
   L.push(`| # | Holder | ${s} collateral | Debt | Debt ÷ ${s} units | LTV | Leverage | Net equity | Health factor | Drop to liquidation |`, "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const x of m.loops) L.push(`| ${x.rank} | ${debank(x.address)} ${x.tag ? `(${x.tag})` : ""} | ${usd(x.suppliedUsd)} | ${debtCell(x)} | ${x.debtPerUnit?.toFixed(3) ?? "—"} | ${pct(x.ltvPct)} | ${x.leverage ? `${x.leverage.toFixed(1)}x` : "—"} | ${usd(x.netEquityUsd)} | ${x.healthFactor?.toFixed(3) ?? "—"} | ${pct(x.dropToLiquidationPct, 2)} |`);

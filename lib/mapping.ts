@@ -140,16 +140,46 @@ async function build(asset: LoopAsset): Promise<MappingResponse> {
     };
   });
 
-  const loopers = rows.filter((x) => x.kind === "Loop");
+  // Rate-path assets (WETH loops) count loops; stablecoin-debt assets count every borrower.
+  const mode: "loop" | "borrow" = asset.debtAssets ? "borrow" : "loop";
+  const loopers = rows.filter((x) => (mode === "loop" ? x.kind === "Loop" : x.kind !== "Supply only"));
   // Positions in detail: every wallet backing at least MIN_DEBT_USD, loops and stablecoin borrowers alike.
   const bigLoops = rows.filter((x) => x.debtBackedUsd >= MIN_DEBT_USD && x.kind !== "Supply only").sort((a, b) => b.debtBackedUsd - a.debtBackedUsd);
-  const others = rows.filter((x) => x.kind !== "Loop");
+  const loopSet = new Set(loopers);
+  const others = rows.filter((x) => !loopSet.has(x));
   const sum = (xs: number[]) => xs.reduce((s, v) => s + v, 0);
   const loopSupplied = sum(loopers.map((x) => x.supplied));
   const debtByAsset = new Map<string, number>();
   for (const x of rows) for (const d of x.debts) debtByAsset.set(d.symbol, (debtByAsset.get(d.symbol) ?? 0) + d.amount * (x.totalDebtUsd > 0 ? Math.min(1, x.debtBackedUsd / x.totalDebtUsd) : 0));
   const lev = bigLoops.map((x) => x.leverage).filter((v): v is number => v != null);
   const ltv = bigLoops.map((x) => x.ltvPct).filter((v): v is number => v != null);
+
+  // Liquidation ladder: debt backed by positions liquidated after a given fall in the asset
+  // (price for borrowers, exchange rate for loops), other collateral held constant.
+  const ladder = [1, 2, 5, 10, 15, 20, 30, 50].map((drop) => {
+    const hit = bigLoops.filter((x) => x.dropToLiquidationPct != null && x.dropToLiquidationPct <= drop);
+    return { dropPct: drop, positions: hit.length, debtUsd: sum(hit.map((x) => x.debtBackedUsd)), collateralUsd: sum(hit.map((x) => x.suppliedUsd)) };
+  });
+  const hfEdges: [string, number, number][] = [["< 1.05", 0, 1.05], ["1.05–1.10", 1.05, 1.1], ["1.10–1.25", 1.1, 1.25], ["1.25–1.50", 1.25, 1.5], ["1.50–2.00", 1.5, 2], ["≥ 2.00", 2, Infinity]];
+  const hfBuckets = hfEdges.map(([label, lo, hi]) => {
+    const xs = bigLoops.filter((x) => x.healthFactor != null && x.healthFactor >= lo && x.healthFactor < hi);
+    return { label, positions: xs.length, debtUsd: sum(xs.map((x) => x.debtBackedUsd)) };
+  });
+  const totalBig = sum(bigLoops.map((x) => x.debtBackedUsd));
+  const wHf = totalBig ? sum(bigLoops.filter((x) => x.healthFactor).map((x) => x.healthFactor! * x.debtBackedUsd)) / sum(bigLoops.filter((x) => x.healthFactor).map((x) => x.debtBackedUsd)) : null;
+  const hhi = totalBig ? sum(bigLoops.map((x) => ((x.debtBackedUsd / totalBig) * 100) ** 2)) : 0;
+  const debtTop = (n: number) => (totalBig ? (sum(bigLoops.slice(0, n).map((x) => x.debtBackedUsd)) / totalBig) * 100 : 0);
+  const contracts = bigLoops.filter((x) => x.isContract);
+  const identified = bigLoops.filter((x) => x.entity && x.entity !== "Unknown whale");
+  const analytics = {
+    mode, weightedHf: wHf, hhi, debtTop1Pct: debtTop(1), debtTop3Pct: debtTop(3), debtTop10Pct: debtTop(10),
+    positionsFor80Pct: (() => { let acc = 0, n = 0; for (const x of bigLoops) { acc += x.debtBackedUsd; n++; if (acc >= totalBig * 0.8) break; } return n; })(),
+    contractDebtPct: totalBig ? (sum(contracts.map((x) => x.debtBackedUsd)) / totalBig) * 100 : 0,
+    identifiedDebtPct: totalBig ? (sum(identified.map((x) => x.debtBackedUsd)) / totalBig) * 100 : 0,
+    sparkDebtUsd: sum(bigLoops.filter((x) => x.spark).map((x) => x.spark!.debtUsd)),
+    sparkPositions: bigLoops.filter((x) => x.spark).length,
+    ladder, hfBuckets,
+  };
 
   // Notes on the positions that matter
   const notes: { rank: number; text: string }[] = [];
@@ -185,7 +215,7 @@ async function build(asset: LoopAsset): Promise<MappingResponse> {
     debtByAsset: [...debtByAsset.entries()].map(([symbol, amount]) => ({ symbol, amount, usd: amount * (res.get(symbol)?.price ?? 1) })).sort((a, b) => b.usd - a.usd),
     leverageRange: lev.length ? [Math.min(...lev), Math.max(...lev)] : null, ltvRange: ltv.length ? [Math.min(...ltv), Math.max(...ltv)] : null,
     othersCount: others.length, othersSupplied: sum(others.map((x) => x.supplied)),
-    holders: rows, loops: bigLoops, notes,
+    holders: rows, loops: bigLoops, notes, analytics,
     known: [...known.values()].sort((a, b) => b.debtUsd - a.debtUsd).map((k) => ({ entity: k.entity, ranks: k.ranks, debtUsd: k.debtUsd, approach: k.info?.approach ?? null, status: k.info?.status ?? null, website: k.info?.website || null, x: k.info?.x || null })),
     unknown: unknown.map((x) => ({ rank: x.rank, address: x.address, debtUsd: x.debtBackedUsd, sharePct: x.sharePct })),
     questions,

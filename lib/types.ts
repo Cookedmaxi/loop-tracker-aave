@@ -202,4 +202,11 @@ export interface MappingResponse {
   known: { entity: string; ranks: number[]; debtUsd: number; approach: string | null; status: string | null; website: string | null; x: string | null }[];
   unknown: { rank: number; address: Address; debtUsd: number; sharePct: number }[];
   questions: string[];
+  analytics: {
+    mode: "loop" | "borrow"; weightedHf: number | null; hhi: number;
+    debtTop1Pct: number; debtTop3Pct: number; debtTop10Pct: number; positionsFor80Pct: number;
+    contractDebtPct: number; identifiedDebtPct: number; sparkDebtUsd: number; sparkPositions: number;
+    ladder: { dropPct: number; positions: number; debtUsd: number; collateralUsd: number }[];
+    hfBuckets: { label: string; positions: number; debtUsd: number }[];
+  };
 }

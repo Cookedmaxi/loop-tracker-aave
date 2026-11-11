@@ -384,3 +384,16 @@ td.bad { color: #fc4434; }
 .pick-grid { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 18px; }
 .pick-card { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-weight: 500; cursor: pointer; }
 .pick-card:hover { border-color: var(--blue); }
+
+/* Mapping: liquidation ladder */
+.two-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--line); }
+.two-inner > .body + .body { border-left: 1px solid var(--line); }
+@media (max-width: 760px) { .two-inner { grid-template-columns: 1fr; } .two-inner > .body + .body { border-left: 0; border-top: 1px solid var(--line); } }
+.ladder { display: grid; gap: 6px; margin: 0 0 10px; }
+.rung { display: grid; grid-template-columns: 76px 1fr 120px; align-items: center; gap: 10px; font-size: 12.5px; padding: 2px 4px; border-radius: 4px; cursor: default; }
+.rung.on { background: var(--raised); }
+.rung .lab { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rung .val { text-align: right; font-variant-numeric: tabular-nums; }
+.rung .lbar { height: 10px; background: var(--raised); border-radius: 3px; overflow: hidden; }
+.rung .lbar i { display: block; height: 100%; background: var(--blue); border-radius: 3px; min-width: 0; }
+.rung .lbar i.bad { background: var(--red); } .rung .lbar i.warn { background: var(--yellow); } .rung .lbar i.ok { background: var(--green); }
