@@ -119,5 +119,12 @@
   {"match": "0xc6711b84d7f79bb443bf4e870f60acf135d99a3c", "label": "StakeWise Boost · osETH loop (strategy 0x7575…f53d)", "entity": "StakeWise Boost", "kind": "Loop holder"},
   {"match": "0x4929e86635a6735b559ecb51981f0dc4ab4bf64f", "label": "Summer.fi account · rETH", "entity": "Summer.fi", "kind": "Loop holder"},
   {"match": "0x563550baa370ec769a4d5951661e4434a8f3ea54", "label": "Summer.fi account · rETH", "entity": "Summer.fi", "kind": "Loop holder"},
-  {"match": "0xae48d2a081458fbf1cbac87355c5cb876f7bd564", "label": "Summer.fi account · rETH", "entity": "Summer.fi", "kind": "Loop holder"}
+  {"match": "0xae48d2a081458fbf1cbac87355c5cb876f7bd564", "label": "Summer.fi account · rETH", "entity": "Summer.fi", "kind": "Loop holder"},
+  {"match": "0x3ef3d8ba38ebe18db133cec108f4d14ce00dd9ae", "label": "Merkl Distributor (rewards custody)", "entity": "Merkl", "kind": "Supply only"},
+  {"match": "0x464c71f6c2f760dda6093dcb91c24c39e5d6e18c", "label": "Aave Collector · Ethereum treasury", "entity": "Aave", "kind": "Treasury"},
+  {"match": "0xdef1fa4cefe67365ba046a7c630d6b885298e210", "label": "ACI Safe · masiv.aci.eth", "entity": "Aave Chan Initiative", "kind": "Supply only"},
+  {"match": "0x31a0ba3c2242a095dbf58a7c53751ecbd27dba9b", "label": "Aave Dust Bin (EtherFi market)", "entity": "Aave", "kind": "Treasury"},
+  {"match": "0xcb09ab3f6254437d225ed3cabebe0949782e2372", "label": "Aave new-listing seed contributor", "entity": "Aave", "kind": "Supply only"},
+  {"match": "0xbdfa4f4492dd7b7cf211209c4791af8d52bf5c50", "label": "@bizyugo (TokenLogic label)", "entity": "@bizyugo", "kind": "Borrower"},
+  {"match": "0x44e8c2451e916c87dde3977dc80f6fb8a1e33b1d", "label": "@deerhunterseth (TokenLogic label)", "entity": "@deerhunterseth", "kind": "Borrower"}
 ]

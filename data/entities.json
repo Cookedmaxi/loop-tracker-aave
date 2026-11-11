@@ -118,5 +118,37 @@
     "status": "The #3 rsETH loop (0xf746…3010) sent 825 ETH on 2 Nov to the 3-signer Safe 0xdd84a24e…8b6b; K3 Capital's wallet 0x4352…3b4f (team borrower sheet) sent 1,520 ETH to the same Safe on 10 Nov. Both were then targeted by the same address-poisoning lookalikes. Same organisation, or a shared OTC desk or custodian. The position is using Kelp's withdrawal manager.",
     "website": "",
     "x": ""
+  },
+  {
+    "entity": "Merkl",
+    "kind": "Protocol · rewards distributor",
+    "approach": "Not a prospect",
+    "status": "Merkl's distributor holds rsETH aTokens as rewards custody, no debt. Label: TokenLogic data repo (tokenlogic-data-sqlmesh seeds).",
+    "website": "https://merkl.xyz",
+    "x": ""
+  },
+  {
+    "entity": "Aave Chan Initiative",
+    "kind": "Aave service provider",
+    "approach": "Internal",
+    "status": "ACI Safe masiv.aci.eth holds a little rsETH, no debt. Label: TokenLogic data repo (tokenlogic-data-sqlmesh seeds).",
+    "website": "",
+    "x": ""
+  },
+  {
+    "entity": "@bizyugo",
+    "kind": "Individual · X handle",
+    "approach": "Contact on X",
+    "status": "Borrows stablecoins against LBTC (#12) and tBTC (#28). Label: TokenLogic data repo (tokenlogic-data-sqlmesh seeds) (aave_positions_wallet_labels).",
+    "website": "",
+    "x": "https://x.com/bizyugo"
+  },
+  {
+    "entity": "@deerhunterseth",
+    "kind": "Individual · X handle",
+    "approach": "Contact on X",
+    "status": "tBTC #7, about $2.4M of stablecoin debt. Label: TokenLogic data repo (tokenlogic-data-sqlmesh seeds) (aave_positions_wallet_labels).",
+    "website": "",
+    "x": "https://x.com/deerhunterseth"
   }
 ]
