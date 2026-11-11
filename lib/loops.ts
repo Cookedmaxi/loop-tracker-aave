@@ -20,7 +20,7 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
   return cached(`loops:${asset.symbol}`, async () => {
     const reserve = await resolveReserve(asset);
     const [holders, holderCount, m] = await Promise.all([
-      getTopHolders(reserve.aToken, TOP_HOLDERS),
+      getTopHolders(reserve.aToken, asset.trackHolders ?? TOP_HOLDERS),
       getHolderCount(reserve.aToken).catch(() => null),
       readAaveMarket(reserve),
     ]);
@@ -34,6 +34,11 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
     const positions: Position[] = chain.map((p, i) => {
       const equity = p.totalCollateralUsd - p.totalDebtUsd;
       const hf = p.healthFactor;
+      // Debt backed by this collateral: the wallet's debt, pro rata to this asset's share of its
+      // collateral (the ARFC's method). For a single-collateral loop it equals the whole debt.
+      const suppliedUsd = p.supplied * m.priceUsd;
+      const share = p.totalCollateralUsd > 0 ? Math.min(1, suppliedUsd / p.totalCollateralUsd) : 0;
+      const debtUsd = p.totalDebtUsd * share;
       return {
         rank: i + 1,
         address: p.address,
@@ -42,11 +47,11 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
         ens: holders[i].ens,
         isContract: holders[i].isContract,
         supplied: p.supplied,
-        suppliedUsd: p.supplied * m.priceUsd,
+        suppliedUsd,
         sharePct: m.suppliedTokens ? (p.supplied / m.suppliedTokens) * 100 : 0,
-        debt: p.debt,
-        debtUsd: p.debt * m.debtPriceUsd,
-        loops: p.debt > 0,
+        debt: m.debtPriceUsd ? debtUsd / m.debtPriceUsd : 0,
+        debtUsd,
+        loops: debtUsd > 100,
         totalCollateralUsd: p.totalCollateralUsd,
         totalDebtUsd: p.totalDebtUsd,
         healthFactor: hf,
@@ -73,7 +78,7 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
       supplyCap: m.supplyCap, borrowCap: m.borrowCap,
       tracked: positions.length, looping: positions.filter((p) => p.loops).length,
       trackedSupplied, trackedSharePct: m.suppliedTokens ? (trackedSupplied / m.suppliedTokens) * 100 : 0,
-      trackedDebt, trackedDebtUsd: trackedDebt * m.debtPriceUsd,
+      trackedDebt, trackedDebtUsd: sum(positions.map((p) => p.debtUsd)),
       debtToCollateralPct: collateralInDebtAsset ? (trackedDebt / collateralInDebtAsset) * 100 : null,
       netEquityInDebtAsset: collateralInDebtAsset ? collateralInDebtAsset - trackedDebt : null,
       underAlert: positions.filter((p) => p.alert).length,

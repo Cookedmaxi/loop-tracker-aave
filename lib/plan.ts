@@ -12,12 +12,13 @@ import { getLoops } from "./loops";
 import { hget, hset, storageKind } from "./store";
 import type { PlanResponse, PlanDay, PlanChange } from "./types";
 
-const erc20 = parseAbi(["function balanceOf(address) view returns (uint256)", "function totalSupply() view returns (uint256)"]);
+const erc20 = parseAbi(["function balanceOf(address) view returns (uint256)", "function totalSupply() view returns (uint256)", "function decimals() view returns (uint8)"]);
 const oracleAbi = parseAbi(["function getAssetPrice(address) view returns (uint256)"]);
 const poolAbi = parseAbi([
   "struct ReserveConfigurationMap { uint256 data; }",
   "struct ReserveData { ReserveConfigurationMap configuration; uint128 liquidityIndex; uint128 currentLiquidityRate; uint128 variableBorrowIndex; uint128 currentVariableBorrowRate; uint128 currentStableBorrowRate; uint40 lastUpdateTimestamp; uint16 id; address aTokenAddress; address stableDebtTokenAddress; address variableDebtTokenAddress; address interestRateStrategyAddress; uint128 accruedToTreasury; uint128 unbacked; uint128 isolationModeTotalDebt; }",
   "function getReserveData(address asset) view returns (ReserveData)",
+  "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)",
 ]);
 
 const DAY = 86_400;
@@ -51,26 +52,32 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
   const days: number[] = [];
   for (let t = first; t < Math.floor(nowS / DAY) * DAY + 1; t += DAY) days.push(t);
 
-  const key = `history:${r.symbol}`;
+  const key = `history:v2:${r.symbol}`;
   const saved = (await load<Record<string, PlanDay>>(key)) ?? {};
   const out: PlanDay[] = [];
   let changed = false;
+  const dec = Number(await c.readContract({ address: r.aToken, abi: erc20, functionName: "decimals" }));
   const readDay = async (t: number): Promise<PlanDay | null> => {
     const date = isoDay(t);
     const block = BigInt(Number(head.number) - Math.round((nowS - t) / BLOCK_SECONDS));
     try {
-      const [supply, price, debtPrice, ...debts] = await Promise.all([
+      const [supply, price, debtPrice, ...rows] = await Promise.all([
         c.readContract({ address: r.aToken, abi: erc20, functionName: "totalSupply", blockNumber: block }),
         c.readContract({ address: AAVE_V3_CORE.oracle, abi: oracleAbi, functionName: "getAssetPrice", args: [r.underlying], blockNumber: block }),
         c.readContract({ address: AAVE_V3_CORE.oracle, abi: oracleAbi, functionName: "getAssetPrice", args: [r.debtUnderlying], blockNumber: block }),
-        ...holders.map((h) => c.readContract({ address: r.variableDebtToken, abi: erc20, functionName: "balanceOf", args: [h], blockNumber: block })),
+        ...holders.map((h) => Promise.all([
+          c.readContract({ address: r.aToken, abi: erc20, functionName: "balanceOf", args: [h], blockNumber: block }),
+          c.readContract({ address: AAVE_V3_CORE.pool, abi: poolAbi, functionName: "getUserAccountData", args: [h], blockNumber: block }),
+        ])),
       ]);
-      const debt = debts.reduce((s, d) => s + Number(formatUnits(d, 18)), 0);
-      const day: PlanDay = {
-        date, block: Number(block), supplied: Number(formatUnits(supply, 18)), debt,
-        debtUsd: debt * Number(formatUnits(debtPrice, 8)), rate: Number(price) / Number(debtPrice),
-      };
-      return day;
+      const px = Number(formatUnits(price, 8)), dpx = Number(formatUnits(debtPrice, 8));
+      // Same attribution as today's positions: the wallet's debt, pro rata to this asset's share of its collateral.
+      const debtUsd = rows.reduce((s, [bal, acct]) => {
+        const coll = Number(formatUnits(acct[0], 8)), debt = Number(formatUnits(acct[1], 8));
+        const mine = Number(formatUnits(bal, dec)) * px;
+        return s + (coll > 0 ? debt * Math.min(1, mine / coll) : 0);
+      }, 0);
+      return { date, block: Number(block), supplied: Number(formatUnits(supply, dec)), debt: dpx ? debtUsd / dpx : 0, debtUsd, rate: Number(price) / Number(debtPrice) };
     } catch { return null; /* the RPC may not serve old state (no archive): skip the day */ }
   };
   const missing = days.filter((t) => !saved[isoDay(t)]);
@@ -207,7 +214,7 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
     const notes: string[] = [];
     const days = await history(r, holders, plan).catch((e) => { notes.push(`History unavailable: ${e instanceof Error ? e.message : "failed"}`); return [] as PlanDay[]; });
     const [carryNow, changeList, moved] = await Promise.all([
-      carry(r, days.slice(-31)).catch((e) => { notes.push(`Carry unavailable: ${e instanceof Error ? e.message : "failed"}`); return null; }),
+      plan.path === "rate" ? carry(r, days.slice(-31)).catch((e) => { notes.push(`Carry unavailable: ${e instanceof Error ? e.message : "failed"}`); return null; }) : Promise.resolve(null),
       changes(r, plan).catch((e) => { notes.push(`Parameter history unavailable: ${e instanceof Error ? e.message : "failed"}`); return [] as PlanChange[]; }),
       swapped(plan, holders).catch(() => new Map<string, number>()),
     ]);
@@ -238,6 +245,15 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
         if (added.length === d.assets.length) { const last = hits[0]; doneAt = last.timestamp; txHash = last.txHash; }
         else if (added.length) detail = `${added.join(", ")} added so far`;
       }
+      if (d?.kind === "reserveFactorAtLeast") {
+        const hit = changeList.find((c) => c.kind === "ReserveFactorChanged" && c.asset === r.symbol && Number(c.values[1]) >= d.pct * 100);
+        if (hit) { doneAt = hit.timestamp; txHash = hit.txHash; detail = hit.text; }
+      }
+      if (d?.kind === "ltCut" && plan.ltBaselinePct) {
+        const hit = changeList.find((c) => c.kind === "CollateralConfigurationChanged" && c.asset === r.symbol && Number(c.values[1]) > 0 && Number(c.values[1]) < plan.ltBaselinePct! * 100);
+        if (hit) { doneAt = hit.timestamp; txHash = hit.txHash; detail = hit.text; }
+        else if (loops.market.liquidationThresholdPct > 0 && loops.market.liquidationThresholdPct < plan.ltBaselinePct) { doneAt = "before tracking"; detail = `LT now ${loops.market.liquidationThresholdPct}%`; }
+      }
       if (d?.kind === "debtRateChange") {
         const hit = changeList.find((c) => c.asset === r.debtSymbol && (c.kind === "ReserveInterestRateDataChanged" || c.kind === "ReserveInterestRateStrategyChanged" || c.kind === "ReserveFactorChanged"));
         if (hit) { doneAt = hit.timestamp; txHash = hit.txHash; detail = hit.text; }
@@ -256,14 +272,38 @@ export function getPlan(asset: LoopAsset, fresh = false): Promise<PlanResponse |
       perWeekTokens: d7 ? (d7.debt - debtNow) : null,
     };
 
+    // LT-cut simulator: HF = Σ collateral × LT / debt, so cutting this asset's LT by d points
+    // lowers a wallet's HF by (its collateral in this asset × d) / its debt. Positions held constant.
+    let ltSim: PlanResponse["ltSim"] = null;
+    if (plan.path === "lt") {
+      const lt = loops.market.liquidationThresholdPct;
+      const borrowers = loops.positions.filter((p) => p.totalDebtUsd > 0 && p.healthFactor != null);
+      const remaining = loops.positions.reduce((s, p) => s + p.suppliedUsd, 0);
+      const cuts = Array.from({ length: 25 }, (_, i) => i + 1).map((d) => {
+        const hit = borrowers.filter((p) => p.healthFactor! >= 1 && p.healthFactor! - (p.suppliedUsd * d) / 100 / p.totalDebtUsd < 1);
+        const usd = hit.reduce((s, p) => s + p.suppliedUsd, 0);
+        return { points: d, ltAfterPct: lt - d, liquidatableUsd: usd, positions: hit.length, sharePct: remaining ? (usd / remaining) * 100 : 0 };
+      });
+      const next = cuts[1];
+      const coveragePct = loops.market.suppliedTokens ? (loops.positions.reduce((s, p) => s + p.supplied, 0) / loops.market.suppliedTokens) * 100 : null;
+      ltSim = {
+        ltPct: lt, baselineLtPct: plan.ltBaselinePct ?? null, cuts, coveragePct, trackedCollateralUsd: remaining, borrowers: borrowers.length,
+        nextStep: { points: 2, liquidatableUsd: next.liquidatableUsd, sharePct: next.sharePct, under2M: next.liquidatableUsd < 2e6, under5Pct: next.sharePct < 5 },
+        maxSafePoints: cuts.filter((c) => c.liquidatableUsd < 2e6 && c.sharePct < 5).reduce((m, c) => (c.points === m + 1 ? c.points : m), 0),
+      };
+    }
+
     const movedUsd = [...moved.values()].reduce((s, v) => s + v, 0);
     const rsethCollUsd = loopers.reduce((s, p) => s + p.suppliedUsd, 0);
 
     const res: PlanResponse = {
       symbol: asset.symbol, debtSymbol: r.debtSymbol, title: PLAN.title, source: PLAN.source,
-      url: PLAN.url, resolution: plan.resolution, pathLabel: plan.pathLabel, notes: [...plan.notes], warnings: notes,
+      url: PLAN.url, resolution: plan.resolution, path: plan.path, pathLabel: plan.pathLabel, ltSim, notes: [...plan.notes], warnings: notes,
       baseline: { ...plan.baseline, debtTokens: base?.debt ?? null, supplied: base?.supplied ?? null, block: base?.block ?? null },
-      now: { debt: debtNow, debtUsd: debtUsdNow, supplied: loops.market.suppliedTokens, positions: loopers.length, asOf: loops.asOf },
+      now: {
+        debt: debtNow, debtUsd: debtUsdNow, supplied: loops.market.suppliedTokens, collateralUsd: loops.market.suppliedUsd, positions: loopers.length, asOf: loops.asOf,
+        top3DebtPct: debtUsdNow > 0 ? ([...loopers].sort((x, y) => y.debtUsd - x.debtUsd).slice(0, 3).reduce((s, p) => s + p.debtUsd, 0) / debtUsdNow) * 100 : null,
+      },
       history: days,
       steps, trend,
       swap: { into: plan.swapInto.map((s) => s.symbol), movedUsd, rsethCollUsd, sharePct: movedUsd + rsethCollUsd > 0 ? (movedUsd / (movedUsd + rsethCollUsd)) * 100 : null },

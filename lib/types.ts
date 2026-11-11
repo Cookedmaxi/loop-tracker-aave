@@ -130,10 +130,16 @@ export interface PlanChange {
 
 export interface PlanResponse {
   symbol: string; debtSymbol: string; title: string; source: string; url: string;
-  resolution: string; pathLabel: string;
+  resolution: string; path: "rate" | "lt"; pathLabel: string;
+  ltSim: {
+    ltPct: number; baselineLtPct: number | null; coveragePct: number | null; trackedCollateralUsd: number; borrowers: number;
+    cuts: { points: number; ltAfterPct: number; liquidatableUsd: number; positions: number; sharePct: number }[];
+    nextStep: { points: number; liquidatableUsd: number; sharePct: number; under2M: boolean; under5Pct: boolean };
+    maxSafePoints: number;
+  } | null;
   notes: string[]; warnings: string[];
   baseline: { date: string; collateralUsd: number; debtUsd: number; revenueUsd: number; debtTokens: number | null; supplied: number | null; block: number | null };
-  now: { debt: number; debtUsd: number; supplied: number; positions: number; asOf: string };
+  now: { debt: number; debtUsd: number; supplied: number; collateralUsd: number; positions: number; asOf: string; top3DebtPct: number | null };
   history: PlanDay[];
   steps: { stage: string; label: string; note: string | null; detail: string | null; doneAt: string | null; txHash: string | null; tracked: boolean }[];
   trend: { change7Pct: number | null; change30Pct: number | null; declining: boolean | null; perWeekTokens: number | null };

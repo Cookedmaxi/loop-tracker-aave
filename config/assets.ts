@@ -16,6 +16,10 @@ export interface LoopAsset {
   debtUnderlying?: Address;
   aToken?: Address;
   variableDebtToken?: Address;
+  /** When the debt is spread over several assets (stablecoins): all of them. debtUnderlying is the one used for pricing. */
+  debtAssets?: { symbol: string; address: Address }[];
+  /** Holders tracked for this asset. Defaults to TOP_HOLDERS. */
+  trackHolders?: number;
 }
 
 export const WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -32,6 +36,18 @@ export const AAVE_V3_CORE = {
   oracle: "0x54586bE62E3c3580375aE3723C145253060Ca0C2" as Address,
 };
 
+/** Assets borrowed against BTC wrappers and rETH: debt is the sum of these, priced at USDC. */
+const STABLE_DEBT = {
+  debtSymbol: "Stablecoins",
+  debtUnderlying: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address,
+  debtAssets: [
+    { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address },
+    { symbol: "USDT", address: "0xdAC17F958D2ee523a2206206994597C13D831ec7" as Address },
+    { symbol: "DAI", address: "0x6B175474E89094C44Da98b954EedeAC495271d0F" as Address },
+    { symbol: "GHO", address: "0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f" as Address },
+  ],
+};
+
 export const ASSETS: LoopAsset[] = [
   {
     symbol: "rsETH",
@@ -39,8 +55,10 @@ export const ASSETS: LoopAsset[] = [
     aToken: "0x2D62109243b87C4bA3EE7bA1D91B0dD0A074d7b1",
     variableDebtToken: "0xeA51d7853EEFb32b6ee06b1C12E6dcCA88Be0fFE",
   },
-  // { symbol: "wstETH", underlying: "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0" },
-  // { symbol: "weETH",  underlying: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee" },
+  { symbol: "osETH", underlying: "0xf1C9acDc66974dFB6dEcB12aA385b9cD01190E38", trackHolders: 20 },
+  { symbol: "LBTC", underlying: "0x8236a87084f8B84306f72007F36F2618A5634494", ...STABLE_DEBT, trackHolders: 40 },
+  { symbol: "tBTC", underlying: "0x18084fbA666a33d37592fA2633fD49a74DD93a88", ...STABLE_DEBT, trackHolders: 40 },
+  { symbol: "rETH", underlying: "0xae78736Cd615f374D3085123A210448E74Fc6393", ...STABLE_DEBT, trackHolders: 40 },
 ];
 
 /** Holders tracked per asset, largest first. */

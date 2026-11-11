@@ -33,6 +33,8 @@ export interface Reserve {
   debtUnderlying: Address;
   aToken: Address;
   variableDebtToken: Address;
+  /** Every asset counted as this collateral's debt (one for loops, several for stablecoins). */
+  debtAssets: { symbol: string; address: Address }[];
 }
 
 /** Fills in the aToken and the debt token from the Pool when the config leaves them out. */
@@ -43,7 +45,8 @@ export async function resolveReserve(asset: LoopAsset): Promise<Reserve> {
     asset.aToken ?? c.readContract({ address: AAVE_V3_CORE.pool, abi: poolAbi, functionName: "getReserveData", args: [asset.underlying] }).then((r) => r.aTokenAddress),
     asset.variableDebtToken ?? c.readContract({ address: AAVE_V3_CORE.pool, abi: poolAbi, functionName: "getReserveData", args: [debtUnderlying] }).then((r) => r.variableDebtTokenAddress),
   ]);
-  return { symbol: asset.symbol, underlying: asset.underlying, debtSymbol: asset.debtSymbol ?? "WETH", debtUnderlying, aToken, variableDebtToken };
+  const debtSymbol = asset.debtSymbol ?? "WETH";
+  return { symbol: asset.symbol, underlying: asset.underlying, debtSymbol, debtUnderlying, aToken, variableDebtToken, debtAssets: asset.debtAssets ?? [{ symbol: debtSymbol, address: debtUnderlying }] };
 }
 
 const bits = (data: bigint, from: number, to: number) => Number((data >> BigInt(from)) & ((1n << BigInt(to - from + 1)) - 1n));

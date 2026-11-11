@@ -85,7 +85,7 @@ async function rawLogs(from: bigint, to: bigint, topics: Topics, address: Addres
  * A span the provider refuses is split in two.
  */
 async function logsIn(f: Filter, from: bigint, to: bigint): Promise<any[]> {
-  const assets = (f.collateralOnly ? [f.reserves.underlying] : [f.reserves.underlying, f.reserves.debtUnderlying]).map(pad);
+  const assets = (f.collateralOnly ? [f.reserves.underlying] : [f.reserves.underlying, ...f.reserves.debtAssets.map((d) => d.address)]).map(pad);
   const users = f.wallets?.length ? f.wallets.map(pad) : null;
   try {
     const [actions, liq] = await Promise.all([

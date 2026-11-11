@@ -25,7 +25,7 @@ const fmt = (n: number | null | undefined, digits = 0) =>
   n === null || n === undefined || !Number.isFinite(n) ? DASH : n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtAmount = (n: number) => fmt(n, Math.abs(n) >= 100 ? 0 : Math.abs(n) >= 1 ? 2 : 4);
 const usd = (n: number | null | undefined) =>
-  n === null || n === undefined || !Number.isFinite(n) ? DASH : n >= 1e9 ? `$${fmt(n / 1e9, 2)}B` : n >= 1e7 ? `$${fmt(n / 1e6, 1)}M` : n >= 1e6 ? `$${fmt(n / 1e6, 2)}M` : `$${fmt(n, 0)}`;
+  n === null || n === undefined || !Number.isFinite(n) ? DASH : n >= 1e9 ? `$${fmt(n / 1e9, 2)}B` : n >= 1e7 ? `$${fmt(n / 1e6, 1)}M` : n >= 1e6 ? `$${fmt(n / 1e6, 2)}M` : n >= 1e4 ? `$${fmt(n / 1e3, 0)}k` : `$${fmt(n, 0)}`;
 const pct = (n: number | null | undefined, digits = 1) => (n === null || n === undefined || !Number.isFinite(n) ? DASH : `${fmt(n, digits)}%`);
 const short = (a: string | null | undefined) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : DASH);
 const when = (iso: string) => {
@@ -90,6 +90,9 @@ function Cell({ label, value, sub, tone }: { label: string; value: string; sub?:
     </div>
   );
 }
+
+/** Stablecoin borrowers: debt is shown in USD, and they borrow rather than loop. */
+const isStable = (debtSymbol: string | undefined) => debtSymbol === "Stablecoins";
 
 const holderName = (p: Position) => p.tag?.label ?? p.ens ?? p.contractName ?? (p.isContract ? "Contract" : "Wallet");
 
@@ -208,7 +211,7 @@ export default function Page() {
   useEffect(() => {
     const fromHash = window.location.hash.replace("#", "") as TabId;
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
-    getJson<Meta>("/api/assets").then((m) => { setMeta(m); loadLoops(m.assets, false); }).catch((e) => setErrors({ site: e.message }));
+    getJson<Meta>("/api/assets").then((m) => { setMeta(m); if (m.assets.length > 1) setPicked((p) => (p.length ? p : [m.assets[0].symbol])); }).catch((e) => setErrors({ site: e.message }));
     getJson<RegistryData>("/api/registry").then(setRegistry).catch(() => setRegistry({ entities: [], tags: [] }));
     loadCommunity();
   }, [loadLoops, loadCommunity]);
@@ -219,8 +222,14 @@ export default function Page() {
     if (needsTx && !txLoaded && !txBusy && !txError && shown.length) loadTx(shown, false);
   }, [needsTx, txLoaded, txBusy, txError, shown, loadTx]);
 
+  // Positions are read for the assets on screen; others load when picked.
+  useEffect(() => {
+    const missing = shown.filter((a) => !loops[a.symbol] && !errors[a.symbol]);
+    if (missing.length && !busy) loadLoops(missing, false);
+  }, [shown, loops, busy, errors, loadLoops]);
+
   const refresh = () => {
-    loadLoops(assets, true);
+    loadLoops(shown, true);
     if (needsTx || Object.keys(tx).length) loadTx(shown, true);
   };
   // Re-read every minute while the page is open and visible, and on coming back to the tab.
@@ -232,7 +241,7 @@ export default function Page() {
     const tick = () => {
       const s = ref.current;
       if (document.visibilityState !== "visible" || s.busy || !s.assets.length) return;
-      loadLoops(s.assets, false);
+      loadLoops(s.shown, false);
       if (s.needsTx || s.txCount) loadTx(s.shown, false);
     };
     const id = window.setInterval(tick, 60_000);
@@ -289,7 +298,7 @@ export default function Page() {
           <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community}
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
-        {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} /> : null}
+        {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} onAll={() => { setPicked([]); setSel(null); }} /> : null}
         {tab === "market" ? <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} /> : null}
         {tab === "tx" ? (
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
@@ -328,12 +337,12 @@ function LoopsTab(props: {
               <p className="k"><a className="title-link" href={a.aaveUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} on ${m.venue}, in the Aave app`}>{m.venue} ↗</a></p>
               <a className="asset-name title-link" href={a.etherscanUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} token on Etherscan`}><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol}</a>
             </div>
-            <Cell label="Tracked holders" value={fmt(m.tracked)} sub={`${fmt(m.looping)} loop against ${m.debtSymbol}`} />
+            <Cell label="Tracked holders" value={fmt(m.tracked)} sub={isStable(m.debtSymbol) ? `${fmt(m.looping)} borrow stablecoins` : `${fmt(m.looping)} loop against ${m.debtSymbol}`} />
             <Cell label={`${a.symbol} supplied`} value={fmt(m.trackedSupplied)} sub={`${pct(m.trackedSharePct, m.trackedSharePct > 99 && m.trackedSharePct < 100 ? 2 : 1)} of the market`} />
-            <Cell label={`${m.debtSymbol} borrowed`} value={fmt(m.trackedDebt)} sub={usd(m.trackedDebtUsd)} />
+            <Cell label={isStable(m.debtSymbol) ? "Debt backed" : `${m.debtSymbol} borrowed`} value={isStable(m.debtSymbol) ? usd(m.trackedDebtUsd) : fmt(m.trackedDebt)} sub={isStable(m.debtSymbol) ? "stablecoins, pro rata to collateral" : usd(m.trackedDebtUsd)} />
             <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} />
             <Cell label={`Health factor below ${hfAlert.toFixed(2)}`} value={fmt(m.underAlert)} tone={m.underAlert ? "bad" : ""} sub="tracked holders" />
-            <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="cost of the loop · TokenLogic" />
+            {isStable(m.debtSymbol) ? null : <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="cost of the loop · TokenLogic" />}
           </div>
         );
       })}
@@ -375,7 +384,7 @@ function LoopsTab(props: {
                         <td className="tagcell">{p.tag ? <EntityTag entity={p.tag.entity} colors={colors} /> : <EntityTag entity={communityOf.get(p.address.toLowerCase())?.entity} colors={colors} community />}</td>
                         <td className="r" data-label="Supplied">{fmtAmount(p.supplied)}</td>
                         <td className="r" data-label="Share">{pct(p.sharePct, p.sharePct < 1 ? 2 : 1)}</td>
-                        <td className="r" data-label="Debt">{p.debt > 0 ? fmtAmount(p.debt) : DASH}</td>
+                        <td className="r" data-label="Debt">{p.debt > 0 ? (isStable(loops[asset]?.market.debtSymbol) ? usd(p.debtUsd) : fmtAmount(p.debt)) : DASH}</td>
                         <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
                         <td className="r" data-label="Health factor"><HealthFactor value={p.healthFactor} alert={hfAlert} /></td>
                       </tr>
@@ -466,11 +475,11 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
         <div>
           <div className="kv"><span>{asset} supplied</span><span>{fmtAmount(p.supplied)} · {usd(p.suppliedUsd)}</span></div>
           <div className="kv"><span>Share of the market</span><span>{pct(p.sharePct, 2)}</span></div>
-          <div className="kv"><span>{debtSymbol} borrowed</span><span>{p.debt > 0 ? `${fmtAmount(p.debt)} · ${usd(p.debtUsd)}` : "None"}</span></div>
+          <div className="kv"><span>{isStable(debtSymbol) ? "Debt backed by it" : `${debtSymbol} borrowed`}</span><span>{p.debt > 0 ? (isStable(debtSymbol) ? usd(p.debtUsd) : `${fmtAmount(p.debt)} · ${usd(p.debtUsd)}`) : "None"}</span></div>
           <div className="kv"><span>All collateral on Aave</span><span>{usd(p.totalCollateralUsd)}</span></div>
           <div className="kv"><span>All debt on Aave</span><span>{usd(p.totalDebtUsd)}</span></div>
           <div className="kv"><span>Net equity</span><span>{usd(p.totalCollateralUsd - p.totalDebtUsd)}</span></div>
-          <div className="kv"><span>Position</span><span>{p.loops ? `${asset}/${debtSymbol} loop` : p.totalDebtUsd > 0 ? "Borrows other assets" : "Supply only"}</span></div>
+          <div className="kv"><span>Position</span><span>{p.loops ? (isStable(debtSymbol) ? "Borrows stablecoins against it" : `${asset}/${debtSymbol} loop`) : p.totalDebtUsd > 0 ? "Borrows other assets" : "Supply only"}</span></div>
         </div>
       </div>
     </div>
@@ -592,7 +601,7 @@ function DebtChart({ plan }: { plan: PlanResponse }) {
   const area = `${line} L${x(pts.length - 1).toFixed(1)},${H - B} L${x(0).toFixed(1)},${H - B} Z`;
   const bi = pts.findIndex((p) => p.date === plan.baseline.date);
   const ticks = [min, (min + max) / 2, max];
-  const k = (v: number) => (v >= 1000 ? `${fmt(v / 1000, v >= 100000 ? 0 : 1)}k` : fmt(v, 0));
+  const k = (v: number) => (plan.path === "lt" ? usd(v) : v >= 1000 ? `${fmt(v / 1000, v >= 100000 ? 0 : 1)}k` : fmt(v, 0));
 
   const pick = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -643,14 +652,133 @@ function DebtChart({ plan }: { plan: PlanResponse }) {
       {h ? (
         <div className={`tip ${leftPct > 60 ? "left" : ""}`} style={{ left: `${leftPct}%` }}>
           <p className="tip-date">{dayLabel(h.date)} {h.date.slice(0, 4)} · 00:00 UTC</p>
-          <div className="tip-row"><span>{plan.debtSymbol} debt</span><strong>{fmt(h.debt)}</strong></div>
-          <div className="tip-row"><span>Value</span><strong>{usd(h.debtUsd)}</strong></div>
-          {prev ? <div className="tip-row"><span>Day change</span><strong className={h.debt < prev.debt ? "pos" : h.debt > prev.debt ? "warn" : ""}>{h.debt - prev.debt > 0 ? "+" : ""}{fmt(h.debt - prev.debt)}</strong></div> : null}
+          {plan.path === "rate" ? <div className="tip-row"><span>{plan.debtSymbol} debt</span><strong>{fmt(h.debt)}</strong></div> : null}
+          <div className="tip-row"><span>{plan.path === "rate" ? "Value" : "Debt backed"}</span><strong>{usd(h.debtUsd)}</strong></div>
+          {prev ? <div className="tip-row"><span>Day change</span><strong className={h.debt < prev.debt ? "pos" : h.debt > prev.debt ? "warn" : ""}>{h.debt - prev.debt > 0 ? "+" : "−"}{plan.path === "rate" ? fmt(Math.abs(h.debt - prev.debt)) : usd(Math.abs(h.debtUsd - prev.debtUsd))}</strong></div> : null}
           {vsBase != null ? <div className="tip-row"><span>vs baseline</span><strong>{signed(vsBase, 2)}</strong></div> : null}
           <div className="tip-row"><span>{plan.symbol} on Aave</span><strong>{fmt(h.supplied)}</strong></div>
           <p className="tip-foot">Block {h.block.toLocaleString("en-US")}</p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Collateral that becomes liquidatable as the LT is cut; hover a bar to read it. */
+function LtChart({ sim, symbol }: { sim: NonNullable<PlanResponse["ltSim"]>; symbol: string }) {
+  const narrow = useNarrow();
+  const [hover, setHover] = useState<number | null>(null);
+  const cuts = sim.cuts;
+  const W = narrow ? 340 : 640, H = narrow ? 220 : 240, L = narrow ? 44 : 56, R = 12, T = 18, B = 30;
+  const limit = Math.max(2e6, (sim.trackedCollateralUsd || 0) * 0.05);
+  const max = Math.max(...cuts.map((c) => c.liquidatableUsd), limit) * 1.1 || 1;
+  const bw = (W - L - R) / cuts.length;
+  const y = (v: number) => T + (1 - v / max) * (H - T - B);
+  const h = hover != null ? cuts[hover] : null;
+  const pick = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W;
+    setHover(Math.max(0, Math.min(cuts.length - 1, Math.floor((px - L) / bw))));
+  };
+  const leftPct = hover != null ? ((L + (hover + 0.5) * bw) / W) * 100 : 0;
+  const k = (v: number) => (v >= 1e6 ? `$${fmt(v / 1e6, 0)}M` : v >= 1e3 ? `$${fmt(v / 1e3, 0)}k` : `$${fmt(v, 0)}`);
+  return (
+    <div className="chart-wrap">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${symbol} collateral liquidatable per LT cut`} onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
+        {[0, max / 2, max].map((v) => (
+          <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 8} y={y(v) + 4} textAnchor="end" className="axis">{k(v)}</text></g>
+        ))}
+        {cuts.map((c, i) => {
+          const ok = c.liquidatableUsd < 2e6 && c.sharePct < 5;
+          return <rect key={c.points} x={L + i * bw + 1.5} width={bw - 3} height={Math.max(2, y(0) - y(c.liquidatableUsd))} y={Math.min(y(c.liquidatableUsd), y(0) - 2)} className={`bar ${ok ? "ok" : "over"} ${hover === i ? "on" : ""}`} rx={2} />;
+        })}
+        <line x1={L} x2={W - R} y1={y(2e6)} y2={y(2e6)} className="trigger" />
+        <text x={W - R} y={y(2e6) - 6} textAnchor="end" className="axis warn">$2M</text>
+        {[1, 5, 10, 15, 20, 25].map((p) => <text key={p} x={L + (p - 0.5) * bw} y={H - 10} textAnchor="middle" className="axis">−{p}</text>)}
+        <rect x={L} y={0} width={W - L - R} height={H} fill="transparent" />
+      </svg>
+      {h ? (
+        <div className={`tip ${leftPct > 60 ? "left" : ""}`} style={{ left: `${leftPct}%` }}>
+          <p className="tip-date">LT cut by {h.points} point{h.points > 1 ? "s" : ""} → {fmt(h.ltAfterPct, 0)}%</p>
+          <div className="tip-row"><span>Liquidatable</span><strong>{usd(h.liquidatableUsd)}</strong></div>
+          <div className="tip-row"><span>Share of collateral</span><strong>{pct(h.sharePct, 2)}</strong></div>
+          <div className="tip-row"><span>Positions</span><strong>{h.positions}</strong></div>
+          <div className="tip-row"><span>ARFC rule</span><strong className={h.liquidatableUsd < 2e6 && h.sharePct < 5 ? "pos" : "warn"}>{h.liquidatableUsd < 2e6 && h.sharePct < 5 ? "within" : "over"}</strong></div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LtSimPanel({ plan }: { plan: PlanResponse }) {
+  const s = plan.ltSim!;
+  const ns = s.nextStep;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>What would an LT cut liquidate?</h2>
+        <p className="hint">The ARFC’s follow-up control, held as a last resort · today’s positions held constant</p>
+      </div>
+      <div className="strip inner">
+        <Cell label="Liquidation threshold" value={pct(s.ltPct, 0)} sub={s.baselineLtPct != null ? `${s.ltPct < s.baselineLtPct ? `cut from ${s.baselineLtPct}%` : "unchanged since the ARFC"}` : undefined} />
+        <Cell label="Next 2-point step" value={usd(ns.liquidatableUsd)} tone={ns.under2M && ns.under5Pct ? "pos" : "warn"} sub={`${pct(ns.sharePct, 2)} of collateral · ${ns.under2M && ns.under5Pct ? "within the ARFC rule" : "over the ARFC rule"}`} />
+        <Cell label="Points cuttable within the rule" value={`${s.maxSafePoints}`} sub="consecutive points under $2M and 5%" />
+        <Cell label="Borrowers tracked" value={fmt(s.borrowers)} sub={`${pct(s.coveragePct)} of the supply`} />
+      </div>
+      <div className="body">
+        <div className="lt-chart"><LtChart sim={s} symbol={plan.symbol} /></div>
+        <p className="note">Each bar: {plan.symbol} collateral held by wallets whose health factor would fall below 1 if the LT were that many points lower. Green bars stay within the ARFC rule for a step (less than $2M and less than 5% of the remaining collateral liquidatable). A wallet’s health factor falls by its {plan.symbol} collateral × the cut ÷ its debt. Wallets using {plan.symbol} in an E-Mode follow the E-Mode’s LT instead and are counted here as if they did not.</p>
+      </div>
+    </div>
+  );
+}
+
+function PlanOverview({ shown, onPick }: { shown: Shown; onPick: (symbol: string) => void }) {
+  const [rows, setRows] = useState<Record<string, PlanResponse | null>>({});
+  useEffect(() => {
+    let live = true;
+    for (const a of shown) getJson<{ plan: PlanResponse | null }>(`/api/plan?asset=${a.symbol}`).then((r) => live && setRows((x) => ({ ...x, [a.symbol]: r.plan }))).catch(() => live && setRows((x) => ({ ...x, [a.symbol]: null })));
+    return () => { live = false; };
+  }, [shown]);
+  const list = shown.map((a) => ({ a, p: rows[a.symbol] })).filter((x) => x.p !== null);
+  const totalNow = list.reduce((s, x) => s + (x.p?.now.debtUsd ?? 0), 0);
+  const totalBase = list.reduce((s, x) => s + (x.p?.baseline.debtUsd ?? 0), 0);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div>
+          <a className="eyebrow title-link" href={list[0]?.p?.url ?? "#"} target="_blank" rel="noopener noreferrer">ARFC: Repositioning Aave V3 Core around Established, Liquid Collateral ↗</a>
+          <h2>All assets in scope</h2>
+        </div>
+        <p className="hint">Debt backed: {usd(totalNow)} today vs {usd(totalBase)} on 9 Nov (ARFC) · select a row</p>
+      </div>
+      <div className="scroll">
+        <table className="stack overview">
+          <thead><tr><th>Asset</th><th>Resolution</th><th className="r">Debt backed</th><th className="r">ARFC, 9 Nov</th><th className="r">Since 9 Nov</th><th className="r">30 days</th><th>Initial measures</th><th>Follow-up</th></tr></thead>
+          <tbody>
+            {shown.map((a) => {
+              const p = rows[a.symbol];
+              if (p === null) return null;
+              if (!p) return <tr key={a.symbol}><td>{a.symbol}</td><td colSpan={7} className="muted">Reading…</td></tr>;
+              const init = p.steps.filter((s) => s.stage === "Initial measures");
+              const follow = p.steps.find((s) => s.stage.startsWith("Follow-up"));
+              const since = p.baseline.debtUsd ? (p.now.debtUsd / p.baseline.debtUsd - 1) * 100 : null;
+              return (
+                <tr key={a.symbol} className="click" onClick={() => onPick(a.symbol)}>
+                  <td className="nw"><strong>{a.symbol}</strong><span className="sub">{p.debtSymbol}</span></td>
+                  <td data-label="Resolution">{p.resolution}<span className="sub">{p.path === "rate" ? "rate path last" : "LT cuts last"}</span></td>
+                  <td className="r" data-label="Debt backed">{usd(p.now.debtUsd)}</td>
+                  <td className="r" data-label="ARFC">{usd(p.baseline.debtUsd)}</td>
+                  <td className={`r ${since != null && since < 0 ? "pos" : ""}`} data-label="Since 9 Nov">{signed(since, 1)}</td>
+                  <td className={`r ${p.trend.declining ? "pos" : p.trend.declining === false ? "warn" : ""}`} data-label="30 days">{signed(p.trend.change30Pct, 1)}</td>
+                  <td data-label="Initial">{init.filter((s) => s.doneAt).length}/{init.length} done</td>
+                  <td data-label="Follow-up">{follow?.doneAt ? <span className="status wait">Applied</span> : <span className="status pending">Not triggered</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -662,8 +790,8 @@ function StepStatus({ s, plan }: { s: PlanResponse["steps"][number]; plan: PlanR
   return <span className="status pending">Awaiting AIP</span>;
 }
 
-function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => string | undefined }) {
-  const asset = shown[0];
+function PlanTab({ shown, logoOf, onPick, onAll }: { shown: Shown; logoOf: (s: string) => string | undefined; onPick: (symbol: string) => void; onAll: () => void }) {
+  const asset = shown.length === 1 ? shown[0] : undefined;
   const [plan, setPlan] = useState<PlanResponse | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -675,7 +803,7 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
     return () => { live = false; window.clearInterval(id); };
   }, [asset]);
 
-  if (!asset) return <div className="panel"><p className="empty">Pick an asset.</p></div>;
+  if (!asset) return <><PlanOverview shown={shown} onPick={onPick} /><ReportPanel /></>;
   if (error) return <div className="panel"><p className="empty">Could not read the plan: {error}</p></div>;
   if (plan === undefined) return <div className="panel"><p className="empty">Reading {asset.symbol}’s offboarding progress from the chain… The first visit backfills the daily history.</p></div>;
   if (plan === null) return <div className="panel"><p className="empty">No offboarding plan is set for {asset.symbol}. Add one in config/plan.ts.</p></div>;
@@ -696,14 +824,18 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
               <span className="pill">{plan.resolution}</span><span className="pill ghost">{plan.pathLabel}</span>
             </div>
           </div>
-          <p className="hint">Figures marked ARFC: {plan.source}. Everything else is read on-chain.</p>
+          <div className="plan-meta">
+            <p className="hint">Figures marked ARFC: {plan.source}. Everything else is read on-chain.</p>
+            <button className="chip plain" onClick={onAll}>All assets · monthly report</button>
+          </div>
         </div>
         <div className="strip inner">
-          <Cell label={`${plan.debtSymbol} debt backed`} value={fmt(n.debt)} sub={`${usd(n.debtUsd)} · ${n.positions} loops`} />
+          <Cell label={plan.path === "rate" ? `${plan.debtSymbol} debt backed` : "Debt backed"} value={plan.path === "rate" ? fmt(n.debt) : usd(n.debtUsd)} sub={plan.path === "rate" ? `${usd(n.debtUsd)} · ${n.positions} loops` : `${n.positions} borrowers tracked · ${plan.debtSymbol.toLowerCase()}`} />
           <Cell label={`Since ${dayLabel(b.date)}`} value={signed(sinceBase, 2)} tone={sinceBase != null && sinceBase < 0 ? "pos" : ""} sub={`ARFC baseline ${usd(b.debtUsd)}`} />
           <Cell label="Exposure, 30 days" value={signed(tr.change30Pct)} tone={tr.declining ? "pos" : tr.declining === false ? "warn" : ""} sub={tr.declining == null ? "needs history" : tr.declining ? "falling: no further measure" : "not falling: follow-up can apply"} />
-          <Cell label={`Moved to ${plan.swap.into.join(", ")}`} value={pct(plan.swap.sharePct)} sub={`${usd(plan.swap.movedUsd)} of the loops’ ETH collateral`} />
-          <Cell label="Loop return on equity" value={signed(roeNow)} tone={roeNow == null ? "" : roeNow > 0 ? "warn" : "pos"} sub={c?.breakevenBps != null ? `negative at +${c.breakevenBps} bps` : undefined} />
+          {plan.swap.into.length ? <Cell label={`Moved to ${plan.swap.into.join(", ")}`} value={pct(plan.swap.sharePct)} sub={`${usd(plan.swap.movedUsd)} of the loops’ ETH collateral`} /> : null}
+          {plan.path === "rate" ? <Cell label="Loop return on equity" value={signed(roeNow)} tone={roeNow == null ? "" : roeNow > 0 ? "warn" : "pos"} sub={c?.breakevenBps != null ? `negative at +${c.breakevenBps} bps` : undefined} /> : null}
+          {plan.ltSim ? <Cell label="Next 2-point LT cut" value={usd(plan.ltSim.nextStep.liquidatableUsd)} tone={plan.ltSim.nextStep.under2M && plan.ltSim.nextStep.under5Pct ? "pos" : "warn"} sub="would become liquidatable" /> : null}
           <Cell label="DAO revenue at stake" value={usd(b.revenueUsd)} sub="a year · ARFC" />
         </div>
       </div>
@@ -711,12 +843,12 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
       <div className="split">
         <div className="panel">
           <div className="panel-head">
-            <h2>{plan.debtSymbol} debt of the loops, daily</h2>
+            <h2>{plan.path === "rate" ? `${plan.debtSymbol} debt of the loops, daily` : `Debt backed by ${plan.symbol}, daily`}</h2>
             <p className="hint">Hover or tap a day</p>
           </div>
           <div className="body">
             <DebtChart plan={plan} />
-            <div className="kv"><span>Last 7 days</span><span>{signed(tr.change7Pct, 2)}{tr.perWeekTokens != null ? ` · ${fmt(Math.abs(tr.perWeekTokens))} ${plan.debtSymbol} ${tr.perWeekTokens >= 0 ? "repaid" : "added"}` : ""}</span></div>
+            <div className="kv"><span>Last 7 days</span><span>{signed(tr.change7Pct, 2)}{tr.perWeekTokens != null ? ` · ${plan.path === "rate" ? `${fmt(Math.abs(tr.perWeekTokens))} ${plan.debtSymbol}` : usd(Math.abs(tr.perWeekTokens) * (n.debt ? n.debtUsd / n.debt : 1))} ${tr.perWeekTokens >= 0 ? "repaid" : "added"}` : ""}</span></div>
             <div className="kv"><span>Last 30 days</span><span>{signed(tr.change30Pct, 2)}</span></div>
             <p className="note">Tracked loop positions at 00:00 UTC each day. Wallets that left the top holders before today are not counted in past days, so earlier days slightly understate the debt.</p>
           </div>
@@ -746,6 +878,8 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
         </div>
       </div>
 
+      {plan.path === "lt" && plan.ltSim ? <LtSimPanel plan={plan} /> : null}
+      {plan.path === "rate" ? (
       <div className="panel">
         <div className="panel-head">
           <h2>Do the loops still pay?</h2>
@@ -762,14 +896,14 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
             <div className="scroll">
               <table className="stack carry">
                 <thead>
-                  <tr><th>Position</th><th className="r">Leverage</th><th className="r">{plan.debtSymbol} debt</th><th className="r">Moved to {plan.swap.into.join("/")}</th>{c.roe.map((r) => <th className="r" key={r.bps}>{r.bps ? `ROE at +${r.bps} bps` : "ROE today"}</th>)}<th className="r">Turns negative at</th></tr>
+                  <tr><th>Position</th><th className="r">Leverage</th><th className="r">{plan.debtSymbol} debt</th>{plan.swap.into.length ? <th className="r">Moved to {plan.swap.into.join("/")}</th> : null}{c.roe.map((r) => <th className="r" key={r.bps}>{r.bps ? `ROE at +${r.bps} bps` : "ROE today"}</th>)}<th className="r">Turns negative at</th></tr>
                 </thead>
                 <tbody>
                   <tr className="total">
                     <td>All loops</td>
                     <td className="r" data-label="Leverage">{c.avgLeverage ? `${fmt(c.avgLeverage, 1)}x` : DASH}</td>
                     <td className="r" data-label="Debt">{usd(n.debtUsd)}</td>
-                    <td className="r" data-label="Moved">{plan.swap.movedUsd ? usd(plan.swap.movedUsd) : DASH}</td>
+                    {plan.swap.into.length ? <td className="r" data-label="Moved">{plan.swap.movedUsd ? usd(plan.swap.movedUsd) : DASH}</td> : null}
                     {c.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
                     <td className="r" data-label="Negative at">{c.breakevenBps != null ? `+${c.breakevenBps} bps` : DASH}</td>
                   </tr>
@@ -778,7 +912,7 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
                       <td className="who">#{p.rank} {p.label ?? short(p.address)}<span className="sub"><Addr address={p.address} /></span></td>
                       <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
                       <td className="r" data-label="Debt">{usd(p.debtUsd)}</td>
-                      <td className={`r ${p.movedUsd > 1000 ? "pos" : ""}`} data-label="Moved">{p.movedUsd > 1000 ? usd(p.movedUsd) : DASH}</td>
+                      {plan.swap.into.length ? <td className={`r ${p.movedUsd > 1000 ? "pos" : ""}`} data-label="Moved">{p.movedUsd > 1000 ? usd(p.movedUsd) : DASH}</td> : null}
                       {p.roe.map((r) => <td className={`r ${r.pct == null ? "" : r.pct > 0 ? "warn" : "pos"}`} key={r.bps} data-label={r.bps ? `+${r.bps} bps` : "Today"}>{signed(r.pct)}</td>)}
                       <td className="r" data-label="Negative at">{p.breakevenBps != null ? `+${p.breakevenBps} bps` : DASH}</td>
                     </tr>
@@ -790,9 +924,10 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
           </>
         ) : <p className="empty">Rates could not be read from the chain.</p>}
       </div>
+      ) : null}
 
       <div className="panel">
-        <div className="panel-head"><h2>Parameter changes on-chain</h2><p className="hint">{plan.symbol}, {plan.debtSymbol}, {plan.swap.into.join(", ")} and E-Mode changes from the Aave Pool Configurator, since 22 October</p></div>
+        <div className="panel-head"><h2>Parameter changes on-chain</h2><p className="hint">{[plan.symbol, plan.path === "rate" ? plan.debtSymbol : null, ...plan.swap.into].filter(Boolean).join(", ")} and E-Mode changes from the Aave Pool Configurator, since 22 October</p></div>
         {plan.changes.length ? (
           <ul className="changes">
             {plan.changes.map((ch) => (
@@ -808,6 +943,78 @@ function PlanTab({ shown, logoOf }: { shown: Shown; logoOf: (s: string) => strin
 
       {plan.warnings.length ? <div className="panel"><div className="body">{plan.warnings.map((w) => <p className="note warn" key={w}>{w}</p>)}</div></div> : null}
     </>
+  );
+}
+
+// ── Monthly report ──────────────────────────────────────────────────────────
+
+/** Just enough Markdown for the report: headings, paragraphs, lists, tables, bold and links. */
+function inlineMd(s: string, key: string) {
+  const parts: React.ReactNode[] = [];
+  const re = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
+  let last = 0, m: RegExpExecArray | null, i = 0;
+  while ((m = re.exec(s))) {
+    if (m.index > last) parts.push(s.slice(last, m.index));
+    parts.push(m[1] ? <a key={`${key}-${i++}`} className="link" href={m[2]} target="_blank" rel="noopener noreferrer">{m[1]}</a> : <strong key={`${key}-${i++}`}>{m[3]}</strong>);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parts.push(s.slice(last));
+  return parts;
+}
+
+function Markdown({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const out: React.ReactNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim()) continue;
+    if (l.startsWith("### ")) out.push(<h4 key={i}>{l.slice(4)}</h4>);
+    else if (l.startsWith("## ")) out.push(<h3 key={i}>{l.slice(3)}</h3>);
+    else if (l.startsWith("# ")) out.push(<h2 key={i} className="report-title">{l.slice(2)}</h2>);
+    else if (l.startsWith("|")) {
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].startsWith("|")) { rows.push(lines[i].slice(1, -1).split("|").map((c) => c.trim())); i++; }
+      i--;
+      const [head, , ...body] = rows;
+      out.push(
+        <div className="scroll" key={i}><table className="report-table"><thead><tr>{head.map((h, j) => <th key={j}>{h}</th>)}</tr></thead>
+          <tbody>{body.map((r, j) => <tr key={j}>{r.map((c, k) => <td key={k}>{inlineMd(c, `${i}-${j}-${k}`)}</td>)}</tr>)}</tbody></table></div>,
+      );
+    } else if (l.startsWith("- ")) {
+      const items: string[] = [];
+      while (i < lines.length && lines[i].startsWith("- ")) { items.push(lines[i].slice(2)); i++; }
+      i--;
+      out.push(<ul key={i}>{items.map((x, j) => <li key={j}>{inlineMd(x, `${i}-${j}`)}</li>)}</ul>);
+    } else out.push(<p key={i}>{inlineMd(l, String(i))}</p>);
+  }
+  return <div className="report">{out}</div>;
+}
+
+function ReportPanel() {
+  const [report, setReport] = useState<{ markdown: string; month: string; generatedAt: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const build = () => {
+    setBusy(true); setError(null);
+    getJson<{ markdown: string; month: string; generatedAt: string }>("/api/report").then(setReport).catch((e) => setError(e instanceof Error ? e.message : "Failed")).finally(() => setBusy(false));
+  };
+  const copy = async () => {
+    if (!report) return;
+    try { await navigator.clipboard.writeText(report.markdown); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
+  };
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div><h2>Monthly progress report</h2><p className="hint">Summary, one section per asset, on-chain changes of the month · Markdown, ready for the forum</p></div>
+        <div className="report-actions">
+          <button className="chip plain" onClick={build} disabled={busy}><span className={busy ? "spin" : ""} aria-hidden="true">↻</span> {busy ? "Building" : report ? "Rebuild" : "Build report"}</button>
+          {report ? <button className="chip plain" onClick={copy}>{copied ? "Copied" : "Copy Markdown"}</button> : null}
+          {report ? <a className="chip plain" href="/api/report?download=1">Download .md</a> : null}
+        </div>
+      </div>
+      {error ? <p className="empty">Could not build the report: {error}</p> : report ? <div className="body"><Markdown text={report.markdown} /></div> : <p className="empty">Builds from today’s on-chain figures for every asset in scope. The first build reads each asset’s history, so it can take a few seconds.</p>}
+    </div>
   );
 }
 
@@ -945,7 +1152,7 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
               <Cell label={`Supplied, in ${a.symbol}`} value={fmt(m.suppliedTokens)} />
               <Cell label={`Supplied, value in ${m.debtSymbol === "WETH" ? "ETH" : m.debtSymbol}`} value={fmt(m.suppliedInDebtAsset)} sub={`${a.symbol} supplied × ${fmt(m.rate, 4)}`} />
               <Cell label="Supplied, value in USD" value={usd(m.suppliedUsd)} />
-              <Cell label={`${m.debtSymbol} debt against it`} value={fmt(m.trackedDebt)} sub="tracked holders" />
+              <Cell label={`${m.debtSymbol} debt against it`} value={isStable(m.debtSymbol) ? usd(m.trackedDebtUsd) : fmt(m.trackedDebt)} sub="tracked holders" />
               <Cell label="Debt, value in USD" value={usd(m.trackedDebtUsd)} />
               <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} sub="tracked holders" />
               <Cell label={`Net equity, in ${m.debtSymbol === "WETH" ? "ETH" : m.debtSymbol}`} value={fmt(m.netEquityInDebtAsset)} sub="tracked holders" />
@@ -959,7 +1166,7 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
               <Cell label="Supply cap" value={m.supplyCap ? fmt(m.supplyCap) : "None"} />
               <Cell label={`${a.symbol} price`} value={`$${fmt(m.priceUsd, 2)}`} sub={m.source === "TokenLogic API" ? "TokenLogic API" : "Aave oracle"} />
               <Cell label={`${a.symbol} supply APY`} value={pct(m.supplyApy, 2)} sub="TokenLogic" />
-              <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="TokenLogic" />
+              {isStable(m.debtSymbol) ? null : <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="TokenLogic" />}
               {m.utilization !== null ? <Cell label="Utilization" value={pct(m.utilization, 1)} sub={m.borrowedTokens !== null ? `${fmt(m.borrowedTokens)} ${a.symbol} borrowed` : undefined} /> : null}
               {m.source === "TokenLogic API" ? <Cell label="Liquidations, 90 days" value={fmt(m.liquidations90d)} sub="whole market · TokenLogic" tone={m.liquidations90d ? "warn" : ""} /> : null}
             </div>
