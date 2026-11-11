@@ -425,3 +425,5 @@ td.bad { color: #fc4434; }
 @media (max-width: 900px) { .cal-wrap { grid-template-columns: 1fr; } .cal-side { border-left: 0; border-top: 1px solid var(--line); } }
 @media (max-width: 420px) { .cal-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); } .cal-day { width: auto; aspect-ratio: 1; height: auto; } .cal-months { padding: 16px; } .cal-month { width: 100%; } }
 td.neg, span.neg { color: var(--red); }
+.cal-switch { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.kv .sub { display: block; text-align: right; font-size: 11px; color: var(--muted); }

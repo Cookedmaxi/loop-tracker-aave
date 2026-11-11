@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Loop Tracker · TokenLogic",
-  description: "Leveraged loop positions on Aave V3 Core, read on-chain.",
+  title: "Core Offboarding Monitor · TokenLogic",
+  description: "Offboarding of rsETH, osETH, LBTC, tBTC and rETH from Aave V3 Core, read on-chain.",
   robots: { index: false, follow: false },
 };
 

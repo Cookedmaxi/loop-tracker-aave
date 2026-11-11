@@ -17,7 +17,7 @@ export const tagCell = (x: MappingHolder) => x.tag ?? (x.ens ? `${x.isContract ?
 export function mappingMarkdown(m: MappingResponse): string {
   const L: string[] = [];
   const s = m.symbol;
-  L.push(`# ${s} on Aave V3 Core — Holder & Loop Breakdown`, "", `${day(m.readAt)} · Loop Tracker`, "");
+  L.push(`# ${s} on Aave V3 Core — Holder & Loop Breakdown`, "", `${day(m.readAt)} · Core Offboarding Monitor`, "");
   L.push("## Summary", "");
   L.push(`The ${s} market on Aave V3 Core: ${m.loopers} of ${m.listed} listed holders ${m.analytics.mode === "loop" ? "loop" : "borrow against"} ${s}, holding ${pct(m.loopSharePct)} of the supply; together the holders back ${usd(m.debtBackedUsd)} of debt.`, "");
   L.push(`- **Total supplied:** ${num(m.totalSupplied)} ${s} (≈ ${usd(m.totalSuppliedUsd)} at $${m.priceUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}), across ${m.holderCount ?? m.listed} holders.`);

@@ -221,7 +221,7 @@ export default function Page() {
   useEffect(() => {
     const fromHash = window.location.hash.replace("#", "") as TabId;
     if (TABS.some((t) => t.id === fromHash)) setTab(fromHash);
-    getJson<Meta>("/api/assets").then((m) => { setMeta(m); if (m.assets.length > 1) setPicked((p) => (p.length ? p : [m.assets[0].symbol])); }).catch((e) => setErrors({ site: e.message }));
+    getJson<Meta>("/api/assets").then((m) => setMeta(m)).catch((e) => setErrors({ site: e.message }));
     getJson<RegistryData>("/api/registry").then(setRegistry).catch(() => setRegistry({ entities: [], tags: [] }));
     loadCommunity();
   }, [loadLoops, loadCommunity]);
@@ -274,7 +274,7 @@ export default function Page() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/tokenlogic.png" alt="TokenLogic" />
           <span className="slash">/</span>
-          <span>Loop Tracker</span>
+          <span>Core Offboarding Monitor</span>
         </div>
         <nav className="nav" role="tablist" aria-label="Sections">
           {TABS.map((t) => (
@@ -758,7 +758,6 @@ function PlanOverview({ shown, onPick }: { shown: Shown; onPick: (symbol: string
   const totalNow = list.reduce((s, x) => s + (x.p?.now.debtUsd ?? 0), 0);
   const totalBase = list.reduce((s, x) => s + (x.p?.baseline.debtUsd ?? 0), 0);
   const ready = list.map((x) => x.p).filter((p): p is PlanResponse => !!p);
-  const cal = useMemo(() => calSum(ready), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
     <div className="panel">
@@ -797,7 +796,7 @@ function PlanOverview({ shown, onPick }: { shown: Shown; onPick: (symbol: string
         </table>
       </div>
     </div>
-    {ready.length === shown.length && ready.length ? <OffboardingCalendar series={cal} baselineDate={ready[0].baseline.date} title={`All ${ready.length} assets, combined`} /> : <div className="panel"><p className="empty">Reading each asset’s daily history for the combined calendar…</p></div>}
+    {ready.length === shown.length && ready.length ? <OffboardingCalendar plans={ready} baselineDate={ready[0].baseline.date} title={`All ${ready.length} assets`} /> : <div className="panel"><p className="empty">Reading each asset’s daily history for the combined calendar…</p></div>}
     </>
   );
 }
@@ -897,7 +896,7 @@ function PlanTab({ shown, logoOf, onPick, onAll }: { shown: Shown; logoOf: (s: s
         </div>
       </div>
 
-      <OffboardingCalendar series={calSeries(plan)} baselineDate={b.date} title={`${plan.symbol} exposure, day by day`} />
+      <OffboardingCalendar plans={[plan]} baselineDate={b.date} title={`${plan.symbol} exposure, day by day`} />
 
       {plan.path === "lt" && plan.ltSim ? <LtSimPanel plan={plan} /> : null}
       {plan.path === "rate" ? (
@@ -2029,24 +2028,70 @@ function MarketOverview({ shown, loops, busy, logoOf, onAsset }: { shown: Shown;
 
 // ── Offboarding calendar ────────────────────────────────────────────────────
 
-export type CalDay = { date: string; debtUsd: number; collUsd: number };
-
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]; baselineDate: string; title: string }) {
-  const [metric, setMetric] = useState<"debtUsd" | "collUsd">("debtUsd");
+type CalPoint = { date: string; coll: number; debt: number; collUsd: number; debtUsd: number };
+
+/** Daily points from a plan's history: collateral in the asset, debt in the debt asset, and both in USD. */
+function calPoints(p: PlanResponse): CalPoint[] {
+  return p.history.map((d) => {
+    const dpx = d.debt > 0 ? d.debtUsd / d.debt : 0;
+    return { date: d.date, coll: d.supplied, debt: d.debt, collUsd: d.supplied * d.rate * dpx, debtUsd: d.debtUsd };
+  });
+}
+
+const unitAmount = (n: number) => fmt(n, Math.abs(n) >= 1000 ? 0 : Math.abs(n) >= 10 ? 1 : Math.abs(n) >= 0.1 ? 2 : 4);
+
+function OffboardingCalendar({ plans, baselineDate, title }: { plans: PlanResponse[]; baselineDate: string; title: string }) {
+  // Unit first: an asset's own count (rsETH, osETH…), or USD, the only unit that adds up across assets.
+  const [unit, setUnit] = useState<string>(plans.length === 1 ? plans[0].symbol : "$");
+  const [measure, setMeasure] = useState<"coll" | "debt">("coll");
   const [hover, setHover] = useState<string | null>(null);
-  const days = useMemo(() => series.map((d, i) => {
-    const prev = series[i - 1];
-    const v = d[metric], pv = prev ? prev[metric] : null;
-    return { ...d, v, change: pv != null ? v - pv : null, changePct: pv ? (v / pv - 1) * 100 : null };
-  }), [series, metric]);
-  if (days.length < 2) return <div className="panel"><div className="panel-head"><h2>Offboarding calendar</h2></div><p className="empty">The calendar fills as the daily history is read from the chain.</p></div>;
+  const plan = plans.find((p) => p.symbol === unit) ?? null;
+  const usdMode = !plan;
+  const stableDebt = plan?.debtSymbol === "Stablecoins";
+  const label = usdMode ? "$" : measure === "coll" ? plan!.symbol : stableDebt ? "USD of stablecoins" : plan!.debtSymbol;
+
+  const points = useMemo<CalPoint[]>(() => {
+    if (plan) return calPoints(plan);
+    const per = plans.map((p) => new Map(calPoints(p).map((d) => [d.date, d])));
+    if (!per.length) return [];
+    const dates = [...per[0].keys()].filter((d) => per.every((m) => m.has(d))).sort();
+    return dates.map((date) => ({ date, coll: 0, debt: 0, collUsd: per.reduce((s, m) => s + m.get(date)!.collUsd, 0), debtUsd: per.reduce((s, m) => s + m.get(date)!.debtUsd, 0) }));
+  }, [plan, plans]);
+  const val = (d: CalPoint) => (usdMode ? (measure === "coll" ? d.collUsd : d.debtUsd) : measure === "coll" ? d.coll : d.debt);
+  const valUsd = (d: CalPoint) => (measure === "coll" ? d.collUsd : d.debtUsd);
+  const days = points.map((d, i) => {
+    const prev = points[i - 1];
+    const v = val(d), pv = prev ? val(prev) : null;
+    return { ...d, v, usdV: valUsd(d), change: pv != null ? v - pv : null, changeUsd: prev ? valUsd(d) - valUsd(prev) : null, changePct: pv ? (v / pv - 1) * 100 : null };
+  });
+
+  const fv = (n: number | null | undefined) => (n == null ? DASH : usdMode || stableDebt && measure === "debt" ? usd(n) : `${unitAmount(n)} ${label}`);
+  const fs = (n: number | null | undefined) => (n == null ? DASH : `${n > 0 ? "+" : n < 0 ? "−" : ""}${fv(Math.abs(n))}`);
+  const fsUsd = (n: number | null | undefined) => (n == null ? DASH : `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(Math.abs(n))}`);
+  /** Second line: the USD value when the first line is in units. */
+  const sub$ = (n: number | null | undefined, signedIt = false) => (usdMode || (stableDebt && measure === "debt") ? undefined : signedIt ? fsUsd(n) : usd(n));
+
+  const switcher = (
+    <div className="cal-switch">
+      <div className="seg" role="group" aria-label="Unit">
+        {plans.map((p) => <button key={p.symbol} aria-pressed={unit === p.symbol} onClick={() => setUnit(p.symbol)}>{p.symbol}</button>)}
+        <button aria-pressed={usdMode} onClick={() => setUnit("$")}>Value $</button>
+      </div>
+      <div className="seg" role="group" aria-label="Measure">
+        <button aria-pressed={measure === "coll"} onClick={() => setMeasure("coll")}>{usdMode ? "Collateral" : `${plan!.symbol} supplied`}</button>
+        <button aria-pressed={measure === "debt"} onClick={() => setMeasure("debt")}>{usdMode ? "Debt" : `${stableDebt ? "Stablecoin" : plan!.debtSymbol} debt`}</button>
+      </div>
+    </div>
+  );
+  if (days.length < 2) return <div className="panel"><div className="panel-head"><div><p className="eyebrow">Offboarding calendar</p><h2>{title}</h2></div>{switcher}</div><p className="empty">The calendar fills as the daily history is read from the chain.</p></div>;
+
   const byDate = new Map(days.map((d) => [d.date, d]));
   const last = days[days.length - 1];
   const at = (n: number) => days[Math.max(0, days.length - 1 - n)];
   const base = byDate.get(baselineDate) ?? days.find((d) => d.date >= baselineDate) ?? null;
-  const maxAbs = Math.max(1, ...days.map((d) => Math.abs(d.change ?? 0)));
+  const maxAbs = Math.max(1e-9, ...days.map((d) => Math.abs(d.change ?? 0)));
   const since = base ? last.v - base.v : null;
   const d30 = last.v - at(30).v, n30 = Math.min(30, days.length - 1);
   const pace = n30 ? d30 / n30 : 0;
@@ -2054,17 +2099,17 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
   const afterBase = base ? days.filter((d) => d.date > base.date && d.change != null) : [];
   const down = afterBase.filter((d) => (d.change ?? 0) < 0).length;
   const best = days.reduce((b, d) => (d.change != null && (b == null || d.change < (b.change ?? 0)) ? d : b), null as (typeof days)[number] | null);
-  const label = metric === "debtUsd" ? "debt" : "collateral";
+  const what = measure === "coll" ? (usdMode ? "collateral" : `${plan!.symbol} supplied`) : "debt";
 
-  // Month grids, Monday first.
   const months: { key: string; y: number; m: number }[] = [];
   for (const d of days) { const [y, m] = d.date.split("-").map(Number); const key = `${y}-${m}`; if (!months.some((x) => x.key === key)) months.push({ key, y, m }); }
   const monthly = months.map(({ key, y, m }) => {
     const xs = days.filter((d) => d.date.startsWith(`${y}-${String(m).padStart(2, "0")}`));
     const prevEnd = days[days.indexOf(xs[0]) - 1];
     const start = prevEnd ? prevEnd.v : xs[0].v, end = xs[xs.length - 1].v;
+    const startUsd = prevEnd ? prevEnd.usdV : xs[0].usdV, endUsd = xs[xs.length - 1].usdV;
     const ch = xs.filter((d) => d.change != null);
-    return { key, label: `${MONTHS[m - 1]} ${y}`, start, end, change: end - start, changePct: start ? (end / start - 1) * 100 : null,
+    return { key, label: `${MONTHS[m - 1]} ${y}`, start, end, change: end - start, changeUsd: endUsd - startUsd, changePct: start ? (end / start - 1) * 100 : null,
       best: ch.reduce((b, d) => (b == null || (d.change ?? 0) < (b.change ?? 0) ? d : b), null as (typeof days)[number] | null),
       worst: ch.reduce((b, d) => (b == null || (d.change ?? 0) > (b.change ?? 0) ? d : b), null as (typeof days)[number] | null),
       down: ch.filter((d) => (d.change ?? 0) < 0).length, n: ch.length,
@@ -2076,24 +2121,22 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
     const k = Math.max(0.18, Math.min(1, Math.sqrt(Math.abs(c) / maxAbs)));
     return { background: `color-mix(in srgb, ${c < 0 ? "var(--green)" : "var(--red)"} ${Math.round(k * 100)}%, var(--raised))` };
   };
-  const signedUsd = (n: number | null) => (n == null ? DASH : `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(Math.abs(n))}`);
+  const toneOf = (n: number | null) => (n == null || n === 0 ? "" : n < 0 ? "pos" : "warn");
+  const units = (d: CalPoint, which: "coll" | "debt") => (which === "coll" ? `${unitAmount(d.coll)} ${plan!.symbol}` : stableDebt ? usd(d.debtUsd) : `${unitAmount(d.debt)} ${plan!.debtSymbol}`);
   return (
     <div className="panel cal-panel">
       <div className="panel-head">
         <div><p className="eyebrow">Offboarding calendar</p><h2>{title}</h2></div>
-        <div className="seg" role="group" aria-label="Metric">
-          <button aria-pressed={metric === "debtUsd"} onClick={() => setMetric("debtUsd")}>Debt</button>
-          <button aria-pressed={metric === "collUsd"} onClick={() => setMetric("collUsd")}>Collateral</button>
-        </div>
+        {switcher}
       </div>
       <div className="strip inner">
-        <Cell label={`${metric === "debtUsd" ? "Debt" : "Collateral"} today`} value={usd(last.v)} sub={`read ${dayLabel(last.date)}`} />
-        <Cell label={`Since ARFC, ${dayLabel(baselineDate)}`} value={signedUsd(since)} tone={since != null && since < 0 ? "pos" : since ? "warn" : ""} sub={base && base.v ? signed((last.v / base.v - 1) * 100, 2) : "baseline not in history"} />
-        <Cell label="Last 24 hours" value={signedUsd(last.change)} tone={(last.change ?? 0) < 0 ? "pos" : last.change ? "warn" : ""} sub={signed(last.changePct, 2)} />
-        <Cell label="Last 7 days" value={signedUsd(last.v - at(7).v)} tone={last.v < at(7).v ? "pos" : last.v > at(7).v ? "warn" : ""} sub={at(7).v ? signed((last.v / at(7).v - 1) * 100, 2) : undefined} />
-        <Cell label="Last 30 days" value={signedUsd(d30)} tone={d30 < 0 ? "pos" : d30 ? "warn" : ""} sub={`${signedUsd(pace)} a day on average`} />
+        <Cell label={`${usdMode || measure === "debt" ? what[0].toUpperCase() + what.slice(1) : what} today`} value={fv(last.v)} sub={sub$(last.usdV) ?? `read ${dayLabel(last.date)}`} />
+        <Cell label={`Since ARFC, ${dayLabel(baselineDate)}`} value={fs(since)} tone={toneOf(since)} sub={base ? [base.v ? signed((last.v / base.v - 1) * 100, 2) : null, sub$(last.usdV - base.usdV, true)].filter(Boolean).join(" · ") : "baseline not in history"} />
+        <Cell label="Last 24 hours" value={fs(last.change)} tone={toneOf(last.change)} sub={[signed(last.changePct, 2), sub$(last.changeUsd, true)].filter(Boolean).join(" · ")} />
+        <Cell label="Last 7 days" value={fs(last.v - at(7).v)} tone={toneOf(last.v - at(7).v)} sub={[at(7).v ? signed((last.v / at(7).v - 1) * 100, 2) : null, sub$(last.usdV - at(7).usdV, true)].filter(Boolean).join(" · ")} />
+        <Cell label="Last 30 days" value={fs(d30)} tone={toneOf(d30)} sub={`${fs(pace)} a day on average`} />
         <Cell label="At this pace" value={eta ? (eta > 3650 ? "> 10 years" : `${fmt(eta)} days`) : "Not falling"} tone={eta ? "" : "warn"} sub={eta ? `to zero, ~${new Date(Date.parse(last.date) + eta * 864e5).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })}` : "30-day trend is flat or up"} />
-        <Cell label="Days falling since ARFC" value={afterBase.length ? `${down} / ${afterBase.length}` : DASH} sub={best ? `largest fall ${signedUsd(best.change)} on ${dayLabel(best.date)}` : undefined} />
+        <Cell label="Days falling since ARFC" value={afterBase.length ? `${down} / ${afterBase.length}` : DASH} sub={best ? `largest fall ${fs(best.change)}, ${dayLabel(best.date)}` : undefined} />
       </div>
       <div className="cal-wrap">
         <div className="cal-months" onPointerLeave={() => setHover(null)}>
@@ -2112,7 +2155,7 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
                     const d = byDate.get(date);
                     return (
                       <button key={date} type="button" className={`cal-day${d ? "" : " none"}${date === baselineDate ? " base" : ""}${hover === date ? " on" : ""}`} style={d ? tone(d.change) : undefined}
-                        onPointerEnter={() => d && setHover(date)} onFocus={() => d && setHover(date)} onClick={() => d && setHover(date)} aria-label={d ? `${date}: ${signedUsd(d.change)}` : date} disabled={!d}>
+                        onPointerEnter={() => d && setHover(date)} onFocus={() => d && setHover(date)} onClick={() => d && setHover(date)} aria-label={d ? `${date}: ${fs(d.change)}` : date} disabled={!d}>
                         <span>{i + 1}</span>
                       </button>
                     );
@@ -2126,16 +2169,25 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
           <p className="k">{h ? new Date(`${h.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }) : ""}</p>
           {h ? (
             <>
-              <p className={`cal-big ${(h.change ?? 0) < 0 ? "pos" : h.change ? "neg" : ""}`}>{signedUsd(h.change)}</p>
-              <p className="muted">{signed(h.changePct, 2)} {label} that day</p>
-              <div className="kv"><span>Debt</span><span>{usd(h.debtUsd)}</span></div>
-              <div className="kv"><span>Collateral</span><span>{usd(h.collUsd)}</span></div>
+              <p className={`cal-big ${(h.change ?? 0) < 0 ? "pos" : h.change ? "neg" : ""}`}>{fs(h.change)}</p>
+              <p className="muted">{[signed(h.changePct, 2), sub$(h.changeUsd, true)].filter(Boolean).join(" · ")} {what} that day</p>
+              {plan ? (
+                <>
+                  <div className="kv"><span>{plan.symbol} supplied</span><span>{units(h, "coll")}<span className="sub">{usd(h.collUsd)}</span></span></div>
+                  <div className="kv"><span>{stableDebt ? "Stablecoin" : plan.debtSymbol} debt</span><span>{units(h, "debt")}{stableDebt ? null : <span className="sub">{usd(h.debtUsd)}</span>}</span></div>
+                </>
+              ) : (
+                <>
+                  <div className="kv"><span>Collateral</span><span>{usd(h.collUsd)}</span></div>
+                  <div className="kv"><span>Debt</span><span>{usd(h.debtUsd)}</span></div>
+                </>
+              )}
               <div className="kv"><span>Debt ÷ collateral</span><span>{pct(h.collUsd ? (h.debtUsd / h.collUsd) * 100 : null)}</span></div>
               {base ? <div className="kv"><span>vs ARFC baseline</span><span>{base.v ? signed((h.v / base.v - 1) * 100, 2) : DASH}</span></div> : null}
             </>
           ) : null}
           <div className="cal-legend"><span>Fall</span><i style={tone(-maxAbs)} /><i style={tone(-maxAbs / 4)} /><i style={tone(-maxAbs / 25)} /><i style={tone(maxAbs / 25)} /><i style={tone(maxAbs / 4)} /><i style={tone(maxAbs)} /><span>Rise</span></div>
-          <p className="note">Ringed day: ARFC baseline. Each cell is the change in {label} from the day before, at 00:00 UTC.</p>
+          <p className="note">Ringed day: ARFC baseline. Each cell is the change in {what}{usdMode ? " (USD)" : ` (${label})`} from the day before, at 00:00 UTC. {usdMode ? "USD moves with prices; pick an asset to see the count itself." : `${plan!.symbol} supplied is the whole Aave V3 Core reserve; debt covers the tracked positions.`}</p>
         </div>
       </div>
       <div className="scroll">
@@ -2145,12 +2197,12 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
             {[...monthly].reverse().map((r) => (
               <tr key={r.key}>
                 <td className="nw"><strong>{r.label}</strong>{r.partial ? <span className="sub">{r.partial}</span> : null}</td>
-                <td className="r" data-label="Start">{usd(r.start)}</td>
-                <td className="r" data-label="End">{usd(r.end)}</td>
-                <td className={`r ${r.change < 0 ? "pos" : r.change > 0 ? "neg" : ""}`} data-label="Change">{signedUsd(r.change)}</td>
+                <td className="r" data-label="Start">{fv(r.start)}</td>
+                <td className="r" data-label="End">{fv(r.end)}</td>
+                <td className={`r ${r.change < 0 ? "pos" : r.change > 0 ? "neg" : ""}`} data-label="Change">{fs(r.change)}{sub$(r.changeUsd, true) ? <span className="sub">{sub$(r.changeUsd, true)}</span> : null}</td>
                 <td className={`r ${r.change < 0 ? "pos" : r.change > 0 ? "neg" : ""}`} data-label="%">{signed(r.changePct, 2)}</td>
-                <td className="r" data-label="Largest fall">{r.best && (r.best.change ?? 0) < 0 ? <>{signedUsd(r.best.change)}<span className="sub">{dayLabel(r.best.date)}</span></> : DASH}</td>
-                <td className="r" data-label="Largest rise">{r.worst && (r.worst.change ?? 0) > 0 ? <>{signedUsd(r.worst.change)}<span className="sub">{dayLabel(r.worst.date)}</span></> : DASH}</td>
+                <td className="r" data-label="Largest fall">{r.best && (r.best.change ?? 0) < 0 ? <>{fs(r.best.change)}<span className="sub">{dayLabel(r.best.date)}</span></> : DASH}</td>
+                <td className="r" data-label="Largest rise">{r.worst && (r.worst.change ?? 0) > 0 ? <>{fs(r.worst.change)}<span className="sub">{dayLabel(r.worst.date)}</span></> : DASH}</td>
                 <td className="r" data-label="Days falling">{r.down} / {r.n}</td>
               </tr>
             ))}
@@ -2159,20 +2211,4 @@ function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]
       </div>
     </div>
   );
-}
-
-/** Daily series from a plan's history: debt and collateral in USD. */
-function calSeries(p: PlanResponse): CalDay[] {
-  return p.history.map((d) => {
-    const dpx = d.debt > 0 ? d.debtUsd / d.debt : 0;
-    return { date: d.date, debtUsd: d.debtUsd, collUsd: d.supplied * d.rate * dpx };
-  });
-}
-
-/** Sum of several plans, on the days every plan has. */
-function calSum(plans: PlanResponse[]): CalDay[] {
-  const per = plans.map((p) => new Map(calSeries(p).map((d) => [d.date, d])));
-  if (!per.length) return [];
-  const dates = [...per[0].keys()].filter((d) => per.every((m) => m.has(d))).sort();
-  return dates.map((date) => ({ date, debtUsd: per.reduce((s, m) => s + m.get(date)!.debtUsd, 0), collUsd: per.reduce((s, m) => s + m.get(date)!.collUsd, 0) }));
 }
