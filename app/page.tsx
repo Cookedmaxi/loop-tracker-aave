@@ -326,8 +326,7 @@ function LoopsTab(props: {
   const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
   const holder = useHolder(props.current?.asset, props.current?.p.address);
-  const [showAll, setShowAll] = useState(false);
-  const visible = showAll ? positions : positions.slice(0, 25);
+  const visible = positions;
   const scan = shown.length === 1 ? loops[shown[0].symbol]?.market.scan : undefined;
   return (
     <>
@@ -358,7 +357,7 @@ function LoopsTab(props: {
             <p className="hint">{scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
           </div>
           {positions.length ? (
-            <div className="scroll">
+            <div className="scroll positions-scroll">
               <table className="stack positions">
                 <thead>
                   <tr>
@@ -397,9 +396,6 @@ function LoopsTab(props: {
               </table>
             </div>
           ) : <p className="empty">{busy ? "Reading positions from the chain…" : "No position to show."}</p>}
-          {positions.length > 25 ? (
-            <div className="more"><button className="chip plain" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show the first 25" : `Show all ${positions.length} positions`}</button></div>
-          ) : null}
           {scan?.capped ? <p className="note warn pad">Holder scan hit its cap of {fmt(scan.scanned)} wallets; positions below that are not counted. Raise MAX_HOLDERS_SCANNED in config/assets.ts.</p> : null}
         </div>
 
@@ -407,7 +403,7 @@ function LoopsTab(props: {
         <div className="o-liq"><Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} /></div>
         </div>
 
-        <div className="col">
+        <div className="col side-sticky">
           {current ? <div className="o-card"><PositionCard row={current} market={loops[current.asset]?.market} hfAlert={hfAlert} colors={colors} /></div> : null}
           {current ? <div className="o-id"><HolderIdentity row={current} detail={holder.detail} colors={colors} community={community.filter((t) => t.address.toLowerCase() === current.p.address.toLowerCase())} /></div> : null}
         </div>
