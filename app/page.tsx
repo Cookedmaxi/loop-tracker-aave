@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommunityTag, Entity, HolderDetail, LoopsResponse, Market, Position, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
@@ -117,7 +117,11 @@ function TxTable({ rows, colors, showWallet }: { rows: Tx[]; colors: Map<string,
                   <span className="sub"><Addr address={t.wallet} /></span>
                 </td>
               ) : null}
-              <td className="nw" data-label="Type">{t.action}</td>
+              <td className="nw" data-label="Type">
+                {t.action}
+                <span className="sub" title={t.source === "Aave event" ? "Read from the Aave Pool contract" : t.source === "TokenLogic" ? "Reported by the TokenLogic API" : "Token transfer from Blockscout"}>{t.source === "Aave event" ? "Aave Pool" : t.source}</span>
+                {t.detail ? <span className="sub">{t.detail}</span> : null}
+              </td>
               <td className="r" data-label="Amount">{fmtAmount(t.amount)}</td>
               <td className="nw" data-label="Token">{t.tokenSymbol || short(t.tokenAddress)}</td>
               <td data-label="Counterparty">
@@ -217,6 +221,24 @@ export default function Page() {
     loadLoops(assets, true);
     if (needsTx || Object.keys(tx).length) loadTx(shown, true);
   };
+  // Re-read every minute while the page is open and visible, and on coming back to the tab.
+  // The server caches answers for 60 s, so many open tabs still cost one chain read a minute.
+  const latest = { assets, shown, needsTx, txCount: Object.keys(tx).length, busy: busy || txBusy };
+  const ref = useRef(latest);
+  ref.current = latest;
+  useEffect(() => {
+    const tick = () => {
+      const s = ref.current;
+      if (document.visibilityState !== "visible" || s.busy || !s.assets.length) return;
+      loadLoops(s.assets, false);
+      if (s.needsTx || s.txCount) loadTx(s.shown, false);
+    };
+    const id = window.setInterval(tick, 60_000);
+    const onShow = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onShow);
+    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", onShow); };
+  }, [loadLoops, loadTx]);
+
   const openTab = (id: TabId) => { setTab(id); window.history.replaceState(null, "", `#${id}`); };
 
   const positions = useMemo(() => shown.flatMap((a) => (loops[a.symbol]?.positions ?? []).map((p) => ({ asset: a.symbol, p }))), [shown, loops]);

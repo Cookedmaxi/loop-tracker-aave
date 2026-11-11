@@ -5,7 +5,8 @@ import { cached } from "./cache";
 import { getAddressTransfers, getHolderCount, getTokenTransfers, getTopHolders, isZero, type RawTransfer } from "./blockscout";
 import { readPositions, resolveReserve, type Reserve } from "./chain";
 import { readAaveMarket } from "./aave";
-import { hasTokenLogicKey, liquidations } from "./tokenlogic";
+import { hasTokenLogicKey, liquidations, type LiquidationRow } from "./tokenlogic";
+import { readPoolEvents, type AaveEvent } from "./events";
 import { tagOf } from "./tags";
 import type { LoopsResponse, Market, Position, Tx } from "./types";
 
@@ -104,11 +105,66 @@ function toTx(t: RawTransfer, r: Reserve, wallet: Address, ranks: Map<string, nu
     wallet, walletRank: ranks.get(wallet.toLowerCase()) ?? null, walletTag: tagOf(wallet),
     action: classify(t, r, wallet), amount: t.amount, tokenSymbol: t.tokenSymbol, tokenAddress: t.tokenAddress,
     assetRelated: [r.aToken, r.variableDebtToken, r.underlying, r.debtUnderlying].some((a) => a.toLowerCase() === token),
-    counterparty, counterpartyTag: tagOf(counterparty),
+    counterparty, counterpartyTag: tagOf(counterparty), source: "Transfer", detail: null,
   };
 }
 
 const newestFirst = (a: Tx, b: Tx) => b.timestamp.localeCompare(a.timestamp);
+
+/** An Aave Pool event as a row of the transaction tables. */
+function eventToTx(e: AaveEvent, r: Reserve, ranks: Map<string, number>): Tx {
+  return {
+    id: `${e.txHash}:${e.logIndex}:${e.wallet.toLowerCase()}`,
+    txHash: e.txHash, timestamp: e.timestamp, asset: r.symbol,
+    wallet: e.wallet, walletRank: ranks.get(e.wallet.toLowerCase()) ?? null, walletTag: tagOf(e.wallet),
+    action: e.action, amount: e.amount, tokenSymbol: e.symbol, tokenAddress: e.reserve, assetRelated: true,
+    counterparty: e.counterparty, counterpartyTag: tagOf(e.counterparty), source: "Aave event", detail: e.extra ?? null,
+  };
+}
+
+/** A liquidation reported by the TokenLogic API, for when the chain read missed it. */
+function liquidationToTx(l: LiquidationRow, r: Reserve, ranks: Map<string, number>): Tx {
+  const wallet = l.user_liquidated as Address;
+  return {
+    id: `${l.tx_hash}:tl:${wallet.toLowerCase()}`, txHash: l.tx_hash, timestamp: new Date(l.timestamp).toISOString(), asset: r.symbol,
+    wallet, walletRank: ranks.get(wallet.toLowerCase()) ?? null, walletTag: tagOf(wallet),
+    action: "Liquidation", amount: Number(l.debt_amount), tokenSymbol: l.debt_symbol, tokenAddress: l.debt_address as Address, assetRelated: true,
+    counterparty: l.liquidator as Address, counterpartyTag: tagOf(l.liquidator), source: "TokenLogic",
+    detail: `${Number(l.collateral_amount).toLocaleString("en-US", { maximumFractionDigits: 2 })} ${l.collateral_symbol} seized`,
+  };
+}
+
+/** Mints and burns of the aToken or debt token are Aave actions, already read as Pool events. */
+const isAaveMintOrBurn = (t: RawTransfer, r: Reserve) =>
+  [r.aToken, r.variableDebtToken].some((a) => a.toLowerCase() === t.tokenAddress.toLowerCase()) && (isZero(t.from) || isZero(t.to));
+
+/**
+ * Aave actions come from the chain (Pool events) and the TokenLogic API (liquidations);
+ * every other token movement comes from Blockscout. If the event read fails (an RPC that
+ * refuses the block range), Aave actions fall back to the aToken and debt-token transfers.
+ */
+async function combine(r: Reserve, ranks: Map<string, number>, events: Promise<AaveEvent[]>, transfers: { wallet: Address; raw: RawTransfer[] }[], wallets: Set<string> | null): Promise<Tx[]> {
+  const ev = await events.catch(() => null);
+  const rows: Tx[] = [];
+  if (ev) rows.push(...ev.map((e) => eventToTx(e, r, ranks)));
+  // With the events in hand, drop the transfers they already explain: aToken and debt-token
+  // mints and burns, and the collateral moving in or out of the aToken in the same transaction.
+  const evTx = new Set((ev ?? []).map((e) => e.txHash.toLowerCase()));
+  const aToken = r.aToken.toLowerCase();
+  const explained = (t: RawTransfer) => isAaveMintOrBurn(t, r) || (evTx.has(t.txHash.toLowerCase()) && [t.from, t.to].some((a) => a.toLowerCase() === aToken));
+  for (const { wallet, raw } of transfers) for (const t of raw) if (!ev || !explained(t)) rows.push(toTx(t, r, wallet, ranks));
+  if (hasTokenLogicKey()) {
+    const seen = new Set(rows.filter((x) => x.action === "Liquidation").map((x) => x.txHash.toLowerCase()));
+    const liqs = await liquidations(AAVE_V3_CORE.marketKey, new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)).catch(() => []);
+    for (const l of liqs) {
+      if (seen.has(l.tx_hash.toLowerCase())) continue;
+      if (wallets && !wallets.has(l.user_liquidated.toLowerCase())) continue;
+      if (!wallets && l.collateral_address?.toLowerCase() !== r.underlying.toLowerCase()) continue;
+      rows.push(liquidationToTx(l, r, ranks));
+    }
+  }
+  return rows.sort(newestFirst);
+}
 
 async function context(asset: LoopAsset, fresh: boolean) {
   const [reserve, loops] = await Promise.all([resolveReserve(asset), getLoops(asset, fresh)]);
@@ -116,35 +172,38 @@ async function context(asset: LoopAsset, fresh: boolean) {
   return { reserve, loops, ranks };
 }
 
-/** Every recent supply, withdrawal and transfer on the market (moves of the aToken). */
+/** Every recent Aave action on the market's collateral, plus aToken moves between wallets. */
 export function getMarketTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
   return cached(`tx:market:${asset.symbol}`, async () => {
     const { reserve, ranks } = await context(asset, fresh);
-    const raw = await getTokenTransfers(reserve.aToken, 50);
-    return raw.map((t) => toTx(t, reserve, (isZero(t.from) ? t.to : t.from) as Address, ranks)).sort(newestFirst);
+    const events = readPoolEvents(reserve, { collateralOnly: true, lookbackBlocks: 50_400 }); // about 7 days
+    const raw = await getTokenTransfers(reserve.aToken, 50).catch(() => [] as RawTransfer[]);
+    const moves = raw.map((t) => ({ wallet: (isZero(t.from) ? t.to : t.from) as Address, raw: [t] }));
+    return combine(reserve, ranks, events, moves, null);
   }, fresh);
 }
 
-/** Recent transfers of every tracked holder, on any token. Read a few wallets at a time. */
+/** Recent Aave actions and token transfers of every tracked holder. */
 export function getHoldersTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
   return cached(`tx:holders:${asset.symbol}`, async () => {
     const { reserve, loops, ranks } = await context(asset, fresh);
-    const out: Tx[] = [];
     const wallets = loops.positions.map((p) => p.address);
+    const events = readPoolEvents(reserve, { wallets });
+    const transfers: { wallet: Address; raw: RawTransfer[] }[] = [];
     for (let i = 0; i < wallets.length; i += 4) {
-      const batch = await Promise.all(wallets.slice(i, i + 4).map((w) =>
-        getAddressTransfers(w, 25).then((raw) => raw.map((t) => toTx(t, reserve, w, ranks))).catch(() => [] as Tx[])));
-      out.push(...batch.flat());
+      const batch = await Promise.all(wallets.slice(i, i + 4).map(async (w) => ({ wallet: w, raw: await getAddressTransfers(w, 25).catch(() => [] as RawTransfer[]) })));
+      transfers.push(...batch);
     }
-    return out.sort(newestFirst);
+    return combine(reserve, ranks, events, transfers, new Set(wallets.map((w) => w.toLowerCase())));
   }, fresh);
 }
 
-/** Recent transfers of one wallet. */
+/** Recent Aave actions and token transfers of one wallet. */
 export function getWalletTx(asset: LoopAsset, wallet: Address, fresh = false): Promise<Tx[]> {
   return cached(`tx:wallet:${asset.symbol}:${wallet.toLowerCase()}`, async () => {
     const { reserve, ranks } = await context(asset, false);
-    const raw = await getAddressTransfers(wallet, 50);
-    return raw.map((t) => toTx(t, reserve, wallet, ranks)).sort(newestFirst);
+    const events = readPoolEvents(reserve, { wallets: [wallet] });
+    const raw = await getAddressTransfers(wallet, 50).catch(() => [] as RawTransfer[]);
+    return combine(reserve, ranks, events, [{ wallet, raw }], new Set([wallet.toLowerCase()]));
   }, fresh);
 }

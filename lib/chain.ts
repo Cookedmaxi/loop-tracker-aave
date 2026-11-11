@@ -19,7 +19,7 @@ const erc20Abi = parseAbi([
 const oracleAbi = parseAbi(["function getAssetPrice(address asset) view returns (uint256)"]);
 
 let _client: PublicClient | null = null;
-function client(): PublicClient {
+export function client(): PublicClient {
   const url = process.env.RPC_URL;
   if (!url) throw new Error("RPC_URL is not set. Add it to the environment variables.");
   if (!_client) _client = createPublicClient({ chain: mainnet, transport: http(url), batch: { multicall: true } });

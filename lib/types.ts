@@ -86,6 +86,8 @@ export interface Tx {
   assetRelated: boolean;       // the token is the asset, its aToken or its debt token
   counterparty: Address | null;
   counterpartyTag: Tag | null;
+  source: "Aave event" | "Transfer" | "TokenLogic"; // Aave event = read from the Pool on-chain
+  detail: string | null;       // e.g. collateral seized in a liquidation
 }
 
 export interface HolderDetail {
