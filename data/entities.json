@@ -75,7 +75,7 @@
     "entity": "StakeWise Boost",
     "kind": "Protocol · leveraged osETH staking",
     "approach": "Engage StakeWise (issuer) on migrating Boost users",
-    "status": "13 of the 15 largest osETH positions are Boost proxies (EthAaveLeverageStrategy). Each proxy belongs to one user; StakeWise controls the strategy, not the funds.",
+    "status": "13 of the 15 largest osETH positions are Boost proxies (EthAaveLeverageStrategy). Each proxy belongs to one user; StakeWise controls the strategy, not the funds. StakeWise strategy contracts EthAaveLeverageStrategy 0x48cd…81fc and 0x7575…f53d deploy or own about 90 osETH positions, nearly all osETH debt on Core.",
     "website": "https://stakewise.io",
     "x": ""
   },
@@ -110,5 +110,13 @@
     "status": "Likely owner of the #2 rsETH loop (Safe 0x40E9…AbA8). Evidence: the Safe's signers 0x8c2a and 0xe32e trade with Galaxy Digital, and $55.6M was withdrawn from Galaxy (team borrower sheet, medium confidence).",
     "website": "https://www.galaxy.com",
     "x": "https://x.com/galaxyhq"
+  },
+  {
+    "entity": "K3 Capital (possible)",
+    "kind": "Trading firm · possible link, low-medium confidence",
+    "approach": "Check ownership with K3 Capital before contacting",
+    "status": "The #3 rsETH loop (0xf746…3010) sent 825 ETH on 2 Nov to the 3-signer Safe 0xdd84a24e…8b6b; K3 Capital's wallet 0x4352…3b4f (team borrower sheet) sent 1,520 ETH to the same Safe on 10 Nov. Both were then targeted by the same address-poisoning lookalikes. Same organisation, or a shared OTC desk or custodian. The position is using Kelp's withdrawal manager.",
+    "website": "",
+    "x": ""
   }
 ]
