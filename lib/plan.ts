@@ -41,6 +41,9 @@ async function save(field: string, value: unknown) {
 
 // ── daily history ─────────────────────────────────────────────────────────────
 
+/** Days of history kept for the chart and the offboarding calendar. */
+const HISTORY_DAYS = 90;
+const BACKFILL_PER_CALL = 24;
 const isoDay = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
 
 /** One reading per day at 00:00 UTC: the asset's supply on Aave and the tracked holders' debt. */
@@ -48,7 +51,7 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
   const c = client();
   const head = await c.getBlock();
   const nowS = Number(head.timestamp);
-  const first = Math.min(Date.parse(`${plan.baseline.date}T00:00:00Z`) / 1000 - 7 * DAY, Math.floor(nowS / DAY) * DAY - 30 * DAY);
+  const first = Math.min(Date.parse(`${plan.baseline.date}T00:00:00Z`) / 1000 - 7 * DAY, Math.floor(nowS / DAY) * DAY - HISTORY_DAYS * DAY);
   const days: number[] = [];
   for (let t = first; t < Math.floor(nowS / DAY) * DAY + 1; t += DAY) days.push(t);
 
@@ -80,7 +83,9 @@ async function history(r: Reserve, holders: Address[], plan: AssetPlan): Promise
       return { date, block: Number(block), supplied: Number(formatUnits(supply, dec)), debt: dpx ? debtUsd / dpx : 0, debtUsd, rate: Number(price) / Number(debtPrice) };
     } catch { return null; /* the RPC may not serve old state (no archive): skip the day */ }
   };
-  const missing = days.filter((t) => !saved[isoDay(t)]);
+  // Newest first, and at most BACKFILL_PER_CALL days per request: a cold start fills the
+  // calendar over a few visits instead of timing out.
+  const missing = days.filter((t) => !saved[isoDay(t)]).reverse().slice(0, BACKFILL_PER_CALL);
   for (let i = 0; i < missing.length; i += 6) {
     for (const day of await Promise.all(missing.slice(i, i + 6).map(readDay))) if (day) { saved[day.date] = day; changed = true; }
   }

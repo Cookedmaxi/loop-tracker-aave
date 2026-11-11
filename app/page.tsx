@@ -263,7 +263,8 @@ export default function Page() {
   const openTab = (id: TabId) => { setTab(id); window.history.replaceState(null, "", `#${id}`); };
 
   const positions = useMemo(() => shown.flatMap((a) => (loops[a.symbol]?.positions ?? []).map((p) => ({ asset: a.symbol, p }))), [shown, loops]);
-  const current = positions.find((x) => sel && x.asset === sel.asset && x.p.address === sel.address) ?? positions[0] ?? null;
+  const largest = useMemo(() => positions.reduce<Row | null>((b, x) => (!b || x.p.debtUsd > b.p.debtUsd ? x : b), null), [positions]);
+  const current = positions.find((x) => sel && x.asset === sel.asset && x.p.address === sel.address) ?? (shown.length > 1 ? largest : positions[0]) ?? null;
   const asOf = shown.map((a) => loops[a.symbol]?.asOf).filter(Boolean).sort()[0];
 
   return (
@@ -305,12 +306,12 @@ export default function Page() {
         {!meta && !errors.site ? <p className="empty">Loading…</p> : null}
 
         {tab === "loops" ? (
-          <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community}
+          <LoopsTab shown={shown} loops={loops} busy={busy} positions={positions} current={current} hfAlert={hfAlert} colors={colors} logoOf={logoOf} communityOf={communityOf} community={community} onAsset={(s) => { setPicked([s]); setSel(null); }}
             onPick={(asset, address) => setSel({ asset, address })} />
         ) : null}
         {tab === "plan" ? <PlanTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} onAll={() => { setPicked([]); setSel(null); }} /> : null}
         {tab === "mapping" ? <MappingTab shown={shown} logoOf={logoOf} onPick={(s) => { setPicked([s]); setSel(null); }} /> : null}
-        {tab === "market" ? <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} /> : null}
+        {tab === "market" ? (shown.length > 1 ? <MarketOverview shown={shown} loops={loops} busy={busy} logoOf={logoOf} onAsset={(s) => { setPicked([s]); setSel(null); }} /> : <MarketTab shown={shown} loops={loops} busy={busy} logoOf={logoOf} />) : null}
         {tab === "tx" ? (
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
         ) : null}
@@ -332,16 +333,17 @@ type Row = { asset: string; p: Position };
 function LoopsTab(props: {
   shown: Shown; loops: Record<string, LoopsResponse>; busy: boolean; positions: Row[]; current: Row | null; hfAlert: number;
   colors: Map<string, string>; logoOf: (s: string) => string | undefined; onPick: (asset: string, address: string) => void;
-  communityOf: Map<string, CommunityTag>; community: CommunityTag[];
+  communityOf: Map<string, CommunityTag>; community: CommunityTag[]; onAsset: (symbol: string) => void;
 }) {
   const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
   const holder = useHolder(props.current?.asset, props.current?.p.address);
-  const visible = positions;
+  // Across assets, one list ranked by the debt each position backs, whatever the asset.
+  const visible = many ? [...positions].sort((a, b) => b.p.debtUsd - a.p.debtUsd || b.p.supplied * (loops[b.asset]?.market.priceUsd ?? 0) - a.p.supplied * (loops[a.asset]?.market.priceUsd ?? 0)) : positions;
   const scan = shown.length === 1 ? loops[shown[0].symbol]?.market.scan : undefined;
   return (
     <>
-      {shown.map((a) => {
+      {many ? <LoopsOverview shown={shown} loops={loops} busy={busy} hfAlert={hfAlert} logoOf={logoOf} onAsset={props.onAsset} /> : shown.map((a) => {
         const m = loops[a.symbol]?.market;
         if (!m) return <div className="panel" key={a.symbol}><p className="empty">{busy ? `Reading ${a.symbol} positions from the chain…` : `No data for ${a.symbol}.`}</p></div>;
         return (
@@ -355,7 +357,7 @@ function LoopsTab(props: {
             <Cell label={isStable(m.debtSymbol) ? "Debt backed" : `${m.debtSymbol} borrowed`} value={isStable(m.debtSymbol) ? usd(m.trackedDebtUsd) : fmt(m.trackedDebt)} sub={isStable(m.debtSymbol) ? "stablecoins, pro rata to collateral" : usd(m.trackedDebtUsd)} />
             <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} />
             <Cell label={`Health factor below ${hfAlert.toFixed(2)}`} value={fmt(m.underAlert)} tone={m.underAlert ? "bad" : ""} sub="tracked holders" />
-            {isStable(m.debtSymbol) ? null : <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="cost of the loop · TokenLogic" />}
+            {isStable(m.debtSymbol) ? <Cell label="Collateral value" value={usd(m.trackedSupplied * m.priceUsd)} sub={`${a.symbol} at $${fmt(m.priceUsd, 0)}`} /> : <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="cost of the loop · TokenLogic" />}
           </div>
         );
       })}
@@ -364,7 +366,7 @@ function LoopsTab(props: {
         <div className="panel master-list">
           <div className="panel-head">
             <h2>Positions</h2>
-            <p className="hint">{scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
+            <p className="hint">{many ? `${positions.length} positions across ${shown.length} assets, largest debt first · select a row` : scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
           </div>
           {positions.length ? (
             <div className="scroll positions-scroll">
@@ -383,12 +385,12 @@ function LoopsTab(props: {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map(({ asset, p }) => {
+                  {visible.map(({ asset, p }, i) => {
                     const on = current?.asset === asset && current.p.address === p.address;
                     return (
                       <tr key={`${asset}:${p.address}`} className={`pick ${on ? "on" : ""}`} onClick={() => onPick(asset, p.address)}>
-                        <td className="num muted rank">{p.rank}</td>
-                        {many ? <td className="nw" data-label="Asset">{asset}</td> : null}
+                        <td className="num muted rank">{many ? i + 1 : p.rank}</td>
+                        {many ? <td className="nw" data-label="Asset"><span className="asset-inline"><AssetLogo symbol={asset} src={logoOf(asset)} />{asset}</span></td> : null}
                         <td className="who">
                           <button className="rowbtn" aria-pressed={on} onClick={(e) => { e.stopPropagation(); onPick(asset, p.address); }}>{holderName(p)}</button>
                           <span className="sub">{short(p.address)}</span>
@@ -396,7 +398,7 @@ function LoopsTab(props: {
                         <td className="tagcell">{p.tag ? <EntityTag entity={p.tag.entity} colors={colors} /> : <EntityTag entity={communityOf.get(p.address.toLowerCase())?.entity} colors={colors} community />}</td>
                         <td className="r" data-label="Supplied">{fmtAmount(p.supplied)}</td>
                         <td className="r" data-label="Share">{pct(p.sharePct, p.sharePct < 1 ? 2 : 1)}</td>
-                        <td className="r" data-label="Debt">{p.debt > 0 ? (isStable(loops[asset]?.market.debtSymbol) ? usd(p.debtUsd) : fmtAmount(p.debt)) : DASH}</td>
+                        <td className="r" data-label="Debt">{p.debt > 0 ? (many ? <>{usd(p.debtUsd)}<span className="sub">{isStable(loops[asset]?.market.debtSymbol) ? "stablecoins" : `${fmtAmount(p.debt)} ${loops[asset]?.market.debtSymbol}`}</span></> : isStable(loops[asset]?.market.debtSymbol) ? usd(p.debtUsd) : fmtAmount(p.debt)) : DASH}</td>
                         <td className="r" data-label="Leverage">{p.leverage ? `${fmt(p.leverage, 1)}x` : DASH}</td>
                         <td className="r" data-label="Health factor"><HealthFactor value={p.healthFactor} alert={hfAlert} /></td>
                       </tr>
@@ -755,7 +757,10 @@ function PlanOverview({ shown, onPick }: { shown: Shown; onPick: (symbol: string
   const list = shown.map((a) => ({ a, p: rows[a.symbol] })).filter((x) => x.p !== null);
   const totalNow = list.reduce((s, x) => s + (x.p?.now.debtUsd ?? 0), 0);
   const totalBase = list.reduce((s, x) => s + (x.p?.baseline.debtUsd ?? 0), 0);
+  const ready = list.map((x) => x.p).filter((p): p is PlanResponse => !!p);
+  const cal = useMemo(() => calSum(ready), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
+    <>
     <div className="panel">
       <div className="panel-head">
         <div>
@@ -792,6 +797,8 @@ function PlanOverview({ shown, onPick }: { shown: Shown; onPick: (symbol: string
         </table>
       </div>
     </div>
+    {ready.length === shown.length && ready.length ? <OffboardingCalendar series={cal} baselineDate={ready[0].baseline.date} title={`All ${ready.length} assets, combined`} /> : <div className="panel"><p className="empty">Reading each asset’s daily history for the combined calendar…</p></div>}
+    </>
   );
 }
 
@@ -889,6 +896,8 @@ function PlanTab({ shown, logoOf, onPick, onAll }: { shown: Shown; logoOf: (s: s
           <div className="body">{plan.notes.map((x) => <p className="note" key={x}>{x}</p>)}</div>
         </div>
       </div>
+
+      <OffboardingCalendar series={calSeries(plan)} baselineDate={b.date} title={`${plan.symbol} exposure, day by day`} />
 
       {plan.path === "lt" && plan.ltSim ? <LtSimPanel plan={plan} /> : null}
       {plan.path === "rate" ? (
@@ -1869,4 +1878,301 @@ function MappingRisk({ m }: { m: MappingResponse }) {
       </div>
     </div>
   );
+}
+
+// ── All assets: Loops overview ──────────────────────────────────────────────
+
+const ASSET_COLORS = ["#2468fc", "#00c880", "#f2c200", "#8b5cf6", "#06b6d4", "#fb923c", "#e879f9", "#fc4434"];
+
+function ShareBar({ parts, logoOf }: { parts: { symbol: string; value: number }[]; logoOf: (s: string) => string | undefined }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const total = parts.reduce((s, x) => s + x.value, 0) || 1;
+  return (
+    <>
+      <div className="stack-bar tall" onPointerLeave={() => setHover(null)}>
+        {parts.map((d, i) => <div key={d.symbol} style={{ width: `${(d.value / total) * 100}%`, background: ASSET_COLORS[i % ASSET_COLORS.length], opacity: hover == null || hover === i ? 1 : 0.35 }} onPointerEnter={() => setHover(i)} />)}
+      </div>
+      <div className="legend">
+        {parts.map((d, i) => (
+          <span key={d.symbol} className={hover === i ? "on" : ""} onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)}>
+            <i className="sw" style={{ background: ASSET_COLORS[i % ASSET_COLORS.length] }} /><AssetLogo symbol={d.symbol} src={logoOf(d.symbol)} />{d.symbol} {usd(d.value)} · {pct((d.value / total) * 100)}
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function LoopsOverview({ shown, loops, busy, hfAlert, logoOf, onAsset }: { shown: Shown; loops: Record<string, LoopsResponse>; busy: boolean; hfAlert: number; logoOf: (s: string) => string | undefined; onAsset: (s: string) => void }) {
+  const rows = shown.map((a) => ({ a, m: loops[a.symbol]?.market })).filter((x): x is { a: Shown[number]; m: Market } => !!x.m);
+  const coll = (m: Market) => m.trackedSupplied * m.priceUsd;
+  const tot = {
+    positions: rows.reduce((s, x) => s + x.m.tracked, 0),
+    withDebt: rows.reduce((s, x) => s + (x.m.scan?.withDebt ?? x.m.looping), 0),
+    coll: rows.reduce((s, x) => s + coll(x.m), 0),
+    debt: rows.reduce((s, x) => s + x.m.trackedDebtUsd, 0),
+    alert: rows.reduce((s, x) => s + x.m.underAlert, 0),
+  };
+  const byDebt = [...rows].sort((x, y) => y.m.trackedDebtUsd - x.m.trackedDebtUsd);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div><p className="eyebrow">Aave V3 Core · all tracked assets</p><div className="asset-name"><AssetStack assets={shown.map((a) => ({ symbol: a.symbol, logo: a.logo }))} />{shown.length} assets in scope</div></div>
+        <p className="hint">{busy && rows.length < shown.length ? `Reading ${shown.length - rows.length} more…` : "Select a row to open the asset"}</p>
+      </div>
+      <div className="strip inner">
+        <Cell label="Tracked positions" value={fmt(tot.positions)} sub={`${fmt(tot.withDebt)} with $10k+ of debt`} />
+        <Cell label="Collateral" value={usd(tot.coll)} sub="tracked holders, Aave oracle" />
+        <Cell label="Debt backed" value={usd(tot.debt)} sub="pro rata to collateral mix" />
+        <Cell label="Debt ÷ collateral" value={pct(tot.coll ? (tot.debt / tot.coll) * 100 : null)} sub="weighted by value" />
+        <Cell label="Net equity" value={usd(tot.coll - tot.debt)} sub="collateral minus debt" />
+        <Cell label={`Health factor below ${hfAlert.toFixed(2)}`} value={fmt(tot.alert)} tone={tot.alert ? "bad" : ""} sub="tracked holders" />
+      </div>
+      <div className="body">
+        <p className="k">Debt backed, by asset</p>
+        <ShareBar parts={byDebt.map((x) => ({ symbol: x.a.symbol, value: x.m.trackedDebtUsd }))} logoOf={logoOf} />
+      </div>
+      <div className="scroll">
+        <table className="stack overview">
+          <thead><tr><th>Asset</th><th className="r">Positions</th><th className="r">Supplied</th><th className="r">Collateral</th><th className="r">Debt backed</th><th className="r">Share of debt</th><th className="r">Debt ÷ collateral</th><th className="r">HF &lt; {hfAlert.toFixed(2)}</th><th className="r">Debt and its cost</th></tr></thead>
+          <tbody>
+            {byDebt.map(({ a, m }) => (
+              <tr key={a.symbol} className="click" onClick={() => onAsset(a.symbol)}>
+                <td className="nw"><span className="asset-inline"><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} /><strong>{a.symbol}</strong></span></td>
+                <td className="r" data-label="Positions">{fmt(m.tracked)}<span className="sub">{fmt(m.scan?.withDebt ?? m.looping)} ≥ $10k</span></td>
+                <td className="r" data-label="Supplied">{fmt(m.trackedSupplied)}<span className="sub">{pct(m.trackedSharePct, 1)} of market</span></td>
+                <td className="r" data-label="Collateral">{usd(coll(m))}</td>
+                <td className="r" data-label="Debt backed">{usd(m.trackedDebtUsd)}</td>
+                <td className="r" data-label="Share">{pct(tot.debt ? (m.trackedDebtUsd / tot.debt) * 100 : null)}</td>
+                <td className="r" data-label="Debt ÷ collateral">{pct(m.debtToCollateralPct)}</td>
+                <td className={`r ${m.underAlert ? "neg" : ""}`} data-label="HF alert">{fmt(m.underAlert)}</td>
+                <td className="r" data-label="Debt">{isStable(m.debtSymbol) ? "Stablecoins" : `${m.debtSymbol} · ${pct(m.debtBorrowApy, 2)}`}</td>
+              </tr>
+            ))}
+            {rows.length > 1 ? (
+              <tr className="total">
+                <td>All assets</td>
+                <td className="r" data-label="Positions">{fmt(tot.positions)}</td><td className="r" data-label="Supplied">{DASH}</td>
+                <td className="r" data-label="Collateral">{usd(tot.coll)}</td><td className="r" data-label="Debt backed">{usd(tot.debt)}</td>
+                <td className="r" data-label="Share">100%</td><td className="r" data-label="Debt ÷ collateral">{pct(tot.coll ? (tot.debt / tot.coll) * 100 : null)}</td>
+                <td className="r" data-label="HF alert">{fmt(tot.alert)}</td><td className="r" data-label="Debt">{DASH}</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── All assets: Market overview ─────────────────────────────────────────────
+
+function MarketOverview({ shown, loops, busy, logoOf, onAsset }: { shown: Shown; loops: Record<string, LoopsResponse>; busy: boolean; logoOf: (s: string) => string | undefined; onAsset: (s: string) => void }) {
+  const rows = shown.map((a) => ({ a, m: loops[a.symbol]?.market })).filter((x): x is { a: Shown[number]; m: Market } => !!x.m).sort((x, y) => y.m.suppliedUsd - x.m.suppliedUsd);
+  const supplied = rows.reduce((s, x) => s + x.m.suppliedUsd, 0);
+  const debt = rows.reduce((s, x) => s + x.m.trackedDebtUsd, 0);
+  const trackedColl = rows.reduce((s, x) => s + x.m.trackedSupplied * x.m.priceUsd, 0);
+  const holders = rows.reduce((s, x) => s + (x.m.holders ?? 0), 0);
+  const frozen = rows.filter((x) => x.m.frozen || x.m.paused).length;
+  const liq = rows.reduce((s, x) => s + (x.m.liquidations90d ?? 0), 0);
+  const wApy = supplied ? rows.reduce((s, x) => s + (x.m.supplyApy ?? 0) * x.m.suppliedUsd, 0) / supplied : null;
+  const status = (m: Market) => (m.paused ? "Paused" : m.frozen ? "Frozen" : m.active ? "Active" : "Inactive");
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-head">
+          <div><p className="eyebrow">Aave V3 Core · combined markets</p><div className="asset-name"><AssetStack assets={shown.map((a) => ({ symbol: a.symbol, logo: a.logo }))} />Global view</div></div>
+          <p className="hint">{busy && rows.length < shown.length ? `Reading ${shown.length - rows.length} more…` : "Select a row for the asset’s market and issuer risk"}</p>
+        </div>
+        <div className="strip inner">
+          <Cell label="Supplied, all markets" value={usd(supplied)} sub={`${rows.length} reserves, Aave oracle`} />
+          <Cell label="Debt backed" value={usd(debt)} sub="tracked holders" />
+          <Cell label="Debt ÷ collateral" value={pct(trackedColl ? (debt / trackedColl) * 100 : null)} sub="tracked holders, weighted" />
+          <Cell label="Net equity" value={usd(trackedColl - debt)} sub="tracked holders" />
+          <Cell label="Holders" value={fmt(holders)} sub="sum across reserves" />
+          <Cell label="Reserves frozen" value={`${frozen} / ${rows.length}`} tone={frozen ? "warn" : ""} sub="LTV 0, no new supply" />
+          <Cell label="Supply APY, weighted" value={pct(wApy, 2)} sub="by supplied value · TokenLogic" />
+          <Cell label="Liquidations, 90 days" value={fmt(liq)} tone={liq ? "warn" : ""} sub="whole markets · TokenLogic" />
+        </div>
+        <div className="body">
+          <p className="k">Supplied value, by reserve</p>
+          <ShareBar parts={rows.map((x) => ({ symbol: x.a.symbol, value: x.m.suppliedUsd }))} logoOf={logoOf} />
+        </div>
+        <div className="scroll">
+          <table className="stack overview">
+            <thead><tr><th>Reserve</th><th>Status</th><th className="r">Supplied</th><th className="r">Share</th><th className="r">Supply cap used</th><th className="r">Holders</th><th className="r">Top 10</th><th className="r">LTV / LT</th><th className="r">Supply APY</th><th className="r">Debt asset</th><th className="r">Utilization</th><th className="r">Liq. 90d</th></tr></thead>
+            <tbody>
+              {rows.map(({ a, m }) => (
+                <tr key={a.symbol} className="click" onClick={() => onAsset(a.symbol)}>
+                  <td className="nw"><span className="asset-inline"><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} /><strong>{a.symbol}</strong></span><span className="sub">${fmt(m.priceUsd, 0)}</span></td>
+                  <td data-label="Status"><span className={`status ${status(m) === "Active" ? "done" : "wait"}`}>{status(m)}</span></td>
+                  <td className="r" data-label="Supplied">{usd(m.suppliedUsd)}<span className="sub">{fmt(m.suppliedTokens)} {a.symbol}</span></td>
+                  <td className="r" data-label="Share">{pct(supplied ? (m.suppliedUsd / supplied) * 100 : null)}</td>
+                  <td className="r" data-label="Cap used">{m.supplyCap ? pct((m.suppliedTokens / m.supplyCap) * 100) : "No cap"}</td>
+                  <td className="r" data-label="Holders">{fmt(m.holders)}</td>
+                  <td className="r" data-label="Top 10">{pct(m.top10SharePct)}</td>
+                  <td className="r" data-label="LTV / LT">{pct(m.ltvPct, 0)} / {pct(m.liquidationThresholdPct, 0)}</td>
+                  <td className="r" data-label="Supply APY">{pct(m.supplyApy, 2)}</td>
+                  <td className="r" data-label="Debt asset">{isStable(m.debtSymbol) ? "Stablecoins" : <>{m.debtSymbol}<span className="sub">{pct(m.debtBorrowApy, 2)} borrow</span></>}</td>
+                  <td className="r" data-label="Utilization">{pct(m.utilization)}</td>
+                  <td className={`r ${m.liquidations90d ? "warn" : ""}`} data-label="Liq. 90d">{fmt(m.liquidations90d)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p className="note">Supplied values use the Aave oracle at the time of reading. Debt and net equity cover the tracked holders: every position backing $10k+ of debt plus the largest holders. Pick an asset for its full market panel and issuer risk.</p>
+    </>
+  );
+}
+
+// ── Offboarding calendar ────────────────────────────────────────────────────
+
+export type CalDay = { date: string; debtUsd: number; collUsd: number };
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function OffboardingCalendar({ series, baselineDate, title }: { series: CalDay[]; baselineDate: string; title: string }) {
+  const [metric, setMetric] = useState<"debtUsd" | "collUsd">("debtUsd");
+  const [hover, setHover] = useState<string | null>(null);
+  const days = useMemo(() => series.map((d, i) => {
+    const prev = series[i - 1];
+    const v = d[metric], pv = prev ? prev[metric] : null;
+    return { ...d, v, change: pv != null ? v - pv : null, changePct: pv ? (v / pv - 1) * 100 : null };
+  }), [series, metric]);
+  if (days.length < 2) return <div className="panel"><div className="panel-head"><h2>Offboarding calendar</h2></div><p className="empty">The calendar fills as the daily history is read from the chain.</p></div>;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const last = days[days.length - 1];
+  const at = (n: number) => days[Math.max(0, days.length - 1 - n)];
+  const base = byDate.get(baselineDate) ?? days.find((d) => d.date >= baselineDate) ?? null;
+  const maxAbs = Math.max(1, ...days.map((d) => Math.abs(d.change ?? 0)));
+  const since = base ? last.v - base.v : null;
+  const d30 = last.v - at(30).v, n30 = Math.min(30, days.length - 1);
+  const pace = n30 ? d30 / n30 : 0;
+  const eta = pace < 0 ? Math.ceil(last.v / -pace) : null;
+  const afterBase = base ? days.filter((d) => d.date > base.date && d.change != null) : [];
+  const down = afterBase.filter((d) => (d.change ?? 0) < 0).length;
+  const best = days.reduce((b, d) => (d.change != null && (b == null || d.change < (b.change ?? 0)) ? d : b), null as (typeof days)[number] | null);
+  const label = metric === "debtUsd" ? "debt" : "collateral";
+
+  // Month grids, Monday first.
+  const months: { key: string; y: number; m: number }[] = [];
+  for (const d of days) { const [y, m] = d.date.split("-").map(Number); const key = `${y}-${m}`; if (!months.some((x) => x.key === key)) months.push({ key, y, m }); }
+  const monthly = months.map(({ key, y, m }) => {
+    const xs = days.filter((d) => d.date.startsWith(`${y}-${String(m).padStart(2, "0")}`));
+    const prevEnd = days[days.indexOf(xs[0]) - 1];
+    const start = prevEnd ? prevEnd.v : xs[0].v, end = xs[xs.length - 1].v;
+    const ch = xs.filter((d) => d.change != null);
+    return { key, label: `${MONTHS[m - 1]} ${y}`, start, end, change: end - start, changePct: start ? (end / start - 1) * 100 : null,
+      best: ch.reduce((b, d) => (b == null || (d.change ?? 0) < (b.change ?? 0) ? d : b), null as (typeof days)[number] | null),
+      worst: ch.reduce((b, d) => (b == null || (d.change ?? 0) > (b.change ?? 0) ? d : b), null as (typeof days)[number] | null),
+      down: ch.filter((d) => (d.change ?? 0) < 0).length, n: ch.length,
+      partial: Number(xs[0].date.slice(8)) > 1 ? `from ${dayLabel(xs[0].date)}` : Number(xs[xs.length - 1].date.slice(8)) < new Date(Date.UTC(y, m, 0)).getUTCDate() ? "to date" : null };
+  });
+  const h = hover ? byDate.get(hover) : last;
+  const tone = (c: number | null) => {
+    if (c == null) return undefined;
+    const k = Math.max(0.18, Math.min(1, Math.sqrt(Math.abs(c) / maxAbs)));
+    return { background: `color-mix(in srgb, ${c < 0 ? "var(--green)" : "var(--red)"} ${Math.round(k * 100)}%, var(--raised))` };
+  };
+  const signedUsd = (n: number | null) => (n == null ? DASH : `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(Math.abs(n))}`);
+  return (
+    <div className="panel cal-panel">
+      <div className="panel-head">
+        <div><p className="eyebrow">Offboarding calendar</p><h2>{title}</h2></div>
+        <div className="seg" role="group" aria-label="Metric">
+          <button aria-pressed={metric === "debtUsd"} onClick={() => setMetric("debtUsd")}>Debt</button>
+          <button aria-pressed={metric === "collUsd"} onClick={() => setMetric("collUsd")}>Collateral</button>
+        </div>
+      </div>
+      <div className="strip inner">
+        <Cell label={`${metric === "debtUsd" ? "Debt" : "Collateral"} today`} value={usd(last.v)} sub={`read ${dayLabel(last.date)}`} />
+        <Cell label={`Since ARFC, ${dayLabel(baselineDate)}`} value={signedUsd(since)} tone={since != null && since < 0 ? "pos" : since ? "warn" : ""} sub={base && base.v ? signed((last.v / base.v - 1) * 100, 2) : "baseline not in history"} />
+        <Cell label="Last 24 hours" value={signedUsd(last.change)} tone={(last.change ?? 0) < 0 ? "pos" : last.change ? "warn" : ""} sub={signed(last.changePct, 2)} />
+        <Cell label="Last 7 days" value={signedUsd(last.v - at(7).v)} tone={last.v < at(7).v ? "pos" : last.v > at(7).v ? "warn" : ""} sub={at(7).v ? signed((last.v / at(7).v - 1) * 100, 2) : undefined} />
+        <Cell label="Last 30 days" value={signedUsd(d30)} tone={d30 < 0 ? "pos" : d30 ? "warn" : ""} sub={`${signedUsd(pace)} a day on average`} />
+        <Cell label="At this pace" value={eta ? (eta > 3650 ? "> 10 years" : `${fmt(eta)} days`) : "Not falling"} tone={eta ? "" : "warn"} sub={eta ? `to zero, ~${new Date(Date.parse(last.date) + eta * 864e5).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })}` : "30-day trend is flat or up"} />
+        <Cell label="Days falling since ARFC" value={afterBase.length ? `${down} / ${afterBase.length}` : DASH} sub={best ? `largest fall ${signedUsd(best.change)} on ${dayLabel(best.date)}` : undefined} />
+      </div>
+      <div className="cal-wrap">
+        <div className="cal-months" onPointerLeave={() => setHover(null)}>
+          {months.map(({ key, y, m }) => {
+            const first = new Date(Date.UTC(y, m - 1, 1));
+            const lead = (first.getUTCDay() + 6) % 7;
+            const n = new Date(Date.UTC(y, m, 0)).getUTCDate();
+            return (
+              <div className="cal-month" key={key}>
+                <p className="cal-title">{MONTHS[m - 1].slice(0, 3)} {y}</p>
+                <div className="cal-grid">
+                  {["M", "T", "W", "T", "F", "S", "S"].map((w, i) => <span className="cal-wd" key={i}>{w}</span>)}
+                  {Array.from({ length: lead }, (_, i) => <span key={`l${i}`} />)}
+                  {Array.from({ length: n }, (_, i) => {
+                    const date = `${y}-${String(m).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`;
+                    const d = byDate.get(date);
+                    return (
+                      <button key={date} type="button" className={`cal-day${d ? "" : " none"}${date === baselineDate ? " base" : ""}${hover === date ? " on" : ""}`} style={d ? tone(d.change) : undefined}
+                        onPointerEnter={() => d && setHover(date)} onFocus={() => d && setHover(date)} onClick={() => d && setHover(date)} aria-label={d ? `${date}: ${signedUsd(d.change)}` : date} disabled={!d}>
+                        <span>{i + 1}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="cal-side">
+          <p className="k">{h ? new Date(`${h.date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }) : ""}</p>
+          {h ? (
+            <>
+              <p className={`cal-big ${(h.change ?? 0) < 0 ? "pos" : h.change ? "neg" : ""}`}>{signedUsd(h.change)}</p>
+              <p className="muted">{signed(h.changePct, 2)} {label} that day</p>
+              <div className="kv"><span>Debt</span><span>{usd(h.debtUsd)}</span></div>
+              <div className="kv"><span>Collateral</span><span>{usd(h.collUsd)}</span></div>
+              <div className="kv"><span>Debt ÷ collateral</span><span>{pct(h.collUsd ? (h.debtUsd / h.collUsd) * 100 : null)}</span></div>
+              {base ? <div className="kv"><span>vs ARFC baseline</span><span>{base.v ? signed((h.v / base.v - 1) * 100, 2) : DASH}</span></div> : null}
+            </>
+          ) : null}
+          <div className="cal-legend"><span>Fall</span><i style={tone(-maxAbs)} /><i style={tone(-maxAbs / 4)} /><i style={tone(-maxAbs / 25)} /><i style={tone(maxAbs / 25)} /><i style={tone(maxAbs / 4)} /><i style={tone(maxAbs)} /><span>Rise</span></div>
+          <p className="note">Ringed day: ARFC baseline. Each cell is the change in {label} from the day before, at 00:00 UTC.</p>
+        </div>
+      </div>
+      <div className="scroll">
+        <table className="stack overview">
+          <thead><tr><th>Month</th><th className="r">Start</th><th className="r">End</th><th className="r">Change</th><th className="r">%</th><th className="r">Largest fall</th><th className="r">Largest rise</th><th className="r">Days falling</th></tr></thead>
+          <tbody>
+            {[...monthly].reverse().map((r) => (
+              <tr key={r.key}>
+                <td className="nw"><strong>{r.label}</strong>{r.partial ? <span className="sub">{r.partial}</span> : null}</td>
+                <td className="r" data-label="Start">{usd(r.start)}</td>
+                <td className="r" data-label="End">{usd(r.end)}</td>
+                <td className={`r ${r.change < 0 ? "pos" : r.change > 0 ? "neg" : ""}`} data-label="Change">{signedUsd(r.change)}</td>
+                <td className={`r ${r.change < 0 ? "pos" : r.change > 0 ? "neg" : ""}`} data-label="%">{signed(r.changePct, 2)}</td>
+                <td className="r" data-label="Largest fall">{r.best && (r.best.change ?? 0) < 0 ? <>{signedUsd(r.best.change)}<span className="sub">{dayLabel(r.best.date)}</span></> : DASH}</td>
+                <td className="r" data-label="Largest rise">{r.worst && (r.worst.change ?? 0) > 0 ? <>{signedUsd(r.worst.change)}<span className="sub">{dayLabel(r.worst.date)}</span></> : DASH}</td>
+                <td className="r" data-label="Days falling">{r.down} / {r.n}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Daily series from a plan's history: debt and collateral in USD. */
+function calSeries(p: PlanResponse): CalDay[] {
+  return p.history.map((d) => {
+    const dpx = d.debt > 0 ? d.debtUsd / d.debt : 0;
+    return { date: d.date, debtUsd: d.debtUsd, collUsd: d.supplied * d.rate * dpx };
+  });
+}
+
+/** Sum of several plans, on the days every plan has. */
+function calSum(plans: PlanResponse[]): CalDay[] {
+  const per = plans.map((p) => new Map(calSeries(p).map((d) => [d.date, d])));
+  if (!per.length) return [];
+  const dates = [...per[0].keys()].filter((d) => per.every((m) => m.has(d))).sort();
+  return dates.map((date) => ({ date, debtUsd: per.reduce((s, m) => s + m.get(date)!.debtUsd, 0), collUsd: per.reduce((s, m) => s + m.get(date)!.collUsd, 0) }));
 }
