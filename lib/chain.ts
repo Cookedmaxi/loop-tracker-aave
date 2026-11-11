@@ -26,6 +26,13 @@ export function client(): PublicClient {
   return _client;
 }
 
+const decimalsCache = new Map<string, Promise<number>>();
+export function tokenDecimals(token: Address): Promise<number> {
+  const k = token.toLowerCase();
+  if (!decimalsCache.has(k)) decimalsCache.set(k, client().readContract({ address: token, abi: erc20Abi, functionName: "decimals" }).then(Number));
+  return decimalsCache.get(k)!;
+}
+
 export interface Reserve {
   symbol: string;
   underlying: Address;

@@ -341,3 +341,5 @@ table.report-table th { color: var(--muted); font-weight: 500; }
 @media (max-width: 700px) { .plan-meta { justify-items: start; } }
 
 .lt-chart { max-width: 760px; }
+
+.more { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--line); }

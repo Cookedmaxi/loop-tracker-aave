@@ -182,10 +182,10 @@ async function save(key: string, s: Saved) {
  * newest first. Reads only new blocks after the first call; a wallet that joins the list
  * gets its own history read once.
  */
-export async function readPoolEvents(reserves: Reserve, opts: { wallets?: Address[]; lookbackBlocks?: number; collateralOnly?: boolean } = {}): Promise<AaveEvent[]> {
+export async function readPoolEvents(reserves: Reserve, opts: { wallets?: Address[]; lookbackBlocks?: number; collateralOnly?: boolean; tag?: string } = {}): Promise<AaveEvent[]> {
   const lookback = opts.lookbackBlocks ?? LOOKBACK;
   const wallets = (opts.wallets ?? []).map((w) => w.toLowerCase()).sort();
-  const key = `${reserves.symbol}:${opts.collateralOnly ? "collateral" : "all"}:${opts.wallets ? "wallets" : "everyone"}:${lookback}`;
+  const key = `${reserves.symbol}:${opts.collateralOnly ? "collateral" : "all"}:${opts.wallets ? `wallets${opts.tag ? `:${opts.tag}` : ""}` : "everyone"}:${lookback}`;
   const latest = Number(await client().getBlockNumber());
   const floor = Math.max(0, latest - lookback);
   const base: Filter = { reserves, collateralOnly: opts.collateralOnly };

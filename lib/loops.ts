@@ -1,9 +1,9 @@
 // Puts the indexer and the RPC together into what the pages show.
 
-import { AAVE_V3_CORE, ASSETS, HF_ALERT, TOP_HOLDERS, type Address, type LoopAsset } from "@/config/assets";
+import { AAVE_V3_CORE, ASSETS, HF_ALERT, MAX_HOLDERS_SCANNED, MIN_DEBT_USD, TOP_HOLDERS, type Address, type LoopAsset } from "@/config/assets";
 import { cached } from "./cache";
-import { getAddressTransfers, getHolderCount, getTokenTransfers, getTopHolders, isZero, type RawTransfer } from "./blockscout";
-import { readPositions, resolveReserve, type Reserve } from "./chain";
+import { getAddressTransfers, getHolderCount, getTokenTransfers, getTopHolders, isZero, type Holder, type RawTransfer } from "./blockscout";
+import { readPositions, resolveReserve, tokenDecimals, type Reserve } from "./chain";
 import { readAaveMarket } from "./aave";
 import { hasTokenLogicKey, liquidations, type LiquidationRow } from "./tokenlogic";
 import { readPoolEvents, type AaveEvent } from "./events";
@@ -16,14 +16,28 @@ export function findAsset(symbol: string | null): LoopAsset | undefined {
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
+const holderCache = new Map<string, { at: number; value: Promise<{ list: Holder[]; capped: boolean }> }>();
+function holderList(asset: LoopAsset, reserve: Reserve, priceUsd: number) {
+  const hit = holderCache.get(asset.symbol);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
+  const cap = asset.maxHolders ?? MAX_HOLDERS_SCANNED;
+  const value = (async () => {
+    const decimals = await tokenDecimals(reserve.aToken);
+    const list = await getTopHolders(reserve.aToken, cap, priceUsd > 0 ? MIN_DEBT_USD / priceUsd : 0, decimals);
+    return { list, capped: list.length >= cap };
+  })().catch((e) => { holderCache.delete(asset.symbol); throw e; });
+  holderCache.set(asset.symbol, { at: Date.now(), value });
+  return value;
+}
+
 export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse> {
   return cached(`loops:${asset.symbol}`, async () => {
     const reserve = await resolveReserve(asset);
-    const [holders, holderCount, m] = await Promise.all([
-      getTopHolders(reserve.aToken, asset.trackHolders ?? TOP_HOLDERS),
-      getHolderCount(reserve.aToken).catch(() => null),
-      readAaveMarket(reserve),
-    ]);
+    const [holderCount, m] = await Promise.all([getHolderCount(reserve.aToken).catch(() => null), readAaveMarket(reserve)]);
+    // A wallet backs at most its collateral value in debt, so holders below MIN_DEBT_USD of this
+    // asset cannot qualify: scanning stops there. The holder list is reused for 10 minutes.
+    const scanned = await holderList(asset, reserve, m.priceUsd);
+    const holders = scanned.list;
     const [chain, liqs] = await Promise.all([
       readPositions(reserve, holders.map((h) => h.address)),
       // Liquidations of the last 90 days on the market, from the TokenLogic API (key needed).
@@ -31,7 +45,7 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
     ]);
     const rate = m.debtPriceUsd ? m.priceUsd / m.debtPriceUsd : 0;
 
-    const positions: Position[] = chain.map((p, i) => {
+    const all: Position[] = chain.map((p, i) => {
       const equity = p.totalCollateralUsd - p.totalDebtUsd;
       const hf = p.healthFactor;
       // Debt backed by this collateral: the wallet's debt, pro rata to this asset's share of its
@@ -65,6 +79,9 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
       };
     });
 
+    // Every position backing at least MIN_DEBT_USD, plus the largest holders even without debt.
+    const positions = all.filter((p, i) => p.debtUsd >= MIN_DEBT_USD || i < TOP_HOLDERS).map((p, i) => ({ ...p, rank: i + 1 }));
+
     const trackedSupplied = sum(positions.map((p) => p.supplied));
     const trackedDebt = sum(positions.map((p) => p.debt));
     const collateralInDebtAsset = trackedSupplied * rate;
@@ -85,6 +102,7 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
       top1SharePct: share(1), top3SharePct: share(3), top10SharePct: share(10),
       source: m.source, supplyApy: m.supplyApy, debtBorrowApy: m.debtBorrowApy, utilization: m.utilization, borrowedTokens: m.borrowedTokens,
       dataAsOf: m.dataAsOf, notes: m.notes, liquidations90d: liqs.length,
+      scan: { scanned: holders.length, minDebtUsd: MIN_DEBT_USD, capped: scanned.capped, withDebt: positions.filter((p) => p.debtUsd >= MIN_DEBT_USD).length },
     };
     return { asset: asset.symbol, asOf: new Date().toISOString(), market, positions };
   }, fresh);
@@ -192,7 +210,8 @@ export function getMarketTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
 export function getHoldersTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
   return cached(`tx:holders:${asset.symbol}`, async () => {
     const { reserve, loops, ranks } = await context(asset, fresh);
-    const wallets = loops.positions.map((p) => p.address);
+    // Events and transfers for the 30 positions with the most debt: enough for the feed, light on the RPC.
+    const wallets = [...loops.positions].sort((x, y) => y.debtUsd - x.debtUsd).slice(0, 30).map((p) => p.address);
     const events = readPoolEvents(reserve, { wallets });
     const transfers: { wallet: Address; raw: RawTransfer[] }[] = [];
     for (let i = 0; i < wallets.length; i += 4) {
@@ -207,10 +226,11 @@ export function getHoldersTx(asset: LoopAsset, fresh = false): Promise<Tx[]> {
 export function getWalletTx(asset: LoopAsset, wallet: Address, fresh = false): Promise<Tx[]> {
   return cached(`tx:wallet:${asset.symbol}:${wallet.toLowerCase()}`, async () => {
     const { reserve, loops, ranks } = await context(asset, false);
-    // Read with every tracked holder so the saved history is shared with the holders feed.
-    const tracked = loops.positions.map((p) => p.address);
+    // Positions in the holders feed share its saved history; any other wallet gets its own.
+    const top = [...loops.positions].sort((x, y) => y.debtUsd - x.debtUsd).slice(0, 30).map((p) => p.address);
     const w = wallet.toLowerCase();
-    const events = readPoolEvents(reserve, { wallets: tracked.some((t) => t.toLowerCase() === w) ? tracked : [...tracked, wallet] })
+    const inTop = top.some((t) => t.toLowerCase() === w);
+    const events = readPoolEvents(reserve, inTop ? { wallets: top } : { wallets: [wallet], tag: w })
       .then((all) => all.filter((e) => e.wallet.toLowerCase() === w));
     const raw = await getAddressTransfers(wallet, 50).catch(() => [] as RawTransfer[]);
     return combine(reserve, ranks, events, [{ wallet, raw }], new Set([wallet.toLowerCase()]));

@@ -16,10 +16,10 @@ async function get(path: string): Promise<any> {
 
 const hashOf = (a: any): Address | null => (a?.hash ?? a ?? null) as Address | null;
 
-export interface Holder { address: Address; isContract: boolean; name: string | null; ens: string | null }
+export interface Holder { address: Address; isContract: boolean; name: string | null; ens: string | null; balance: number | null }
 
-/** Top holders of a token, largest first. */
-export async function getTopHolders(token: Address, limit: number): Promise<Holder[]> {
+/** Top holders of a token, largest first; stops at `limit` or below `minBalance` (in tokens). */
+export async function getTopHolders(token: Address, limit: number, minBalance = 0, decimals = 18): Promise<Holder[]> {
   const out: Holder[] = [];
   let query = "";
   while (out.length < limit) {
@@ -29,7 +29,9 @@ export async function getTopHolders(token: Address, limit: number): Promise<Hold
       const raw = (a.hash ?? it.address_hash) as string | undefined;
       if (!raw || raw.toLowerCase() === ZERO) continue;
       const address = getAddress(raw.toLowerCase()); // normalise the checksum
-      out.push({ address, isContract: Boolean(a.is_contract), name: a.name ?? null, ens: a.ens_domain_name ?? null });
+      const balance = it.value != null ? Number(it.value) / 10 ** decimals : null;
+      if (minBalance && balance != null && balance < minBalance) return out; // sorted largest first
+      out.push({ address, isContract: Boolean(a.is_contract), name: a.name ?? null, ens: a.ens_domain_name ?? null, balance });
       if (out.length >= limit) break;
     }
     if (!page.next_page_params || !(page.items ?? []).length) break;

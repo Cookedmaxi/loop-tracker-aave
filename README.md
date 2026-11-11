@@ -37,7 +37,7 @@ With `SITE_PASSWORD` set, the site asks for it through the browser's sign-in pro
 | Track another asset's offboarding | `config/plan.ts`: baseline, steps. |
 | Edit an issuer's risk findings or incidents | `config/risk.ts` |
 | Add an asset | `config/assets.ts`: add `{ symbol, underlying }`. Add a logo at `public/assets/<symbol>.png` (optional). |
-| Track more or fewer holders | `TOP_HOLDERS` in `config/assets.ts` |
+| Change which positions are tracked | `MIN_DEBT_USD` (every position backing at least this much debt, default $10k) and `TOP_HOLDERS` (largest holders always shown) in `config/assets.ts` |
 | Change the alert level | `HF_ALERT` in `config/assets.ts` |
 | Tag an address | `data/tags.json`. `match` is a full address or a short form like `0x40E9…AbA8`. |
 | Add an entity, its links or its outreach status | `data/entities.json` |

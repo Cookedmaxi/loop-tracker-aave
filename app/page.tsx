@@ -326,6 +326,9 @@ function LoopsTab(props: {
   const { shown, loops, busy, positions, current, hfAlert, colors, logoOf, onPick, communityOf, community } = props;
   const many = shown.length > 1;
   const holder = useHolder(props.current?.asset, props.current?.p.address);
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? positions : positions.slice(0, 25);
+  const scan = shown.length === 1 ? loops[shown[0].symbol]?.market.scan : undefined;
   return (
     <>
       {shown.map((a) => {
@@ -337,7 +340,7 @@ function LoopsTab(props: {
               <p className="k"><a className="title-link" href={a.aaveUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} on ${m.venue}, in the Aave app`}>{m.venue} ↗</a></p>
               <a className="asset-name title-link" href={a.etherscanUrl} target="_blank" rel="noopener noreferrer" title={`${a.symbol} token on Etherscan`}><AssetLogo symbol={a.symbol} src={logoOf(a.symbol)} />{a.symbol}</a>
             </div>
-            <Cell label="Tracked holders" value={fmt(m.tracked)} sub={isStable(m.debtSymbol) ? `${fmt(m.looping)} borrow stablecoins` : `${fmt(m.looping)} loop against ${m.debtSymbol}`} />
+            <Cell label="Tracked positions" value={fmt(m.tracked)} sub={`${fmt(m.scan?.withDebt ?? m.looping)} with ${usd(m.scan?.minDebtUsd ?? 10000)}+ of ${isStable(m.debtSymbol) ? "stablecoin debt" : `${m.debtSymbol} debt`}`} />
             <Cell label={`${a.symbol} supplied`} value={fmt(m.trackedSupplied)} sub={`${pct(m.trackedSharePct, m.trackedSharePct > 99 && m.trackedSharePct < 100 ? 2 : 1)} of the market`} />
             <Cell label={isStable(m.debtSymbol) ? "Debt backed" : `${m.debtSymbol} borrowed`} value={isStable(m.debtSymbol) ? usd(m.trackedDebtUsd) : fmt(m.trackedDebt)} sub={isStable(m.debtSymbol) ? "stablecoins, pro rata to collateral" : usd(m.trackedDebtUsd)} />
             <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} />
@@ -352,7 +355,7 @@ function LoopsTab(props: {
         <div className="panel o-positions">
           <div className="panel-head">
             <h2>Positions</h2>
-            <p className="hint">Select a row to open the holder</p>
+            <p className="hint">{scan ? `Every position backing ${usd(scan.minDebtUsd)}+ of debt (${scan.withDebt}), plus the largest holders · select a row` : "Select a row to open the holder"}</p>
           </div>
           {positions.length ? (
             <div className="scroll">
@@ -371,7 +374,7 @@ function LoopsTab(props: {
                   </tr>
                 </thead>
                 <tbody>
-                  {positions.map(({ asset, p }) => {
+                  {visible.map(({ asset, p }) => {
                     const on = current?.asset === asset && current.p.address === p.address;
                     return (
                       <tr key={`${asset}:${p.address}`} className={`pick ${on ? "on" : ""}`} onClick={() => onPick(asset, p.address)}>
@@ -394,6 +397,10 @@ function LoopsTab(props: {
               </table>
             </div>
           ) : <p className="empty">{busy ? "Reading positions from the chain…" : "No position to show."}</p>}
+          {positions.length > 25 ? (
+            <div className="more"><button className="chip plain" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show the first 25" : `Show all ${positions.length} positions`}</button></div>
+          ) : null}
+          {scan?.capped ? <p className="note warn pad">Holder scan hit its cap of {fmt(scan.scanned)} wallets; positions below that are not counted. Raise MAX_HOLDERS_SCANNED in config/assets.ts.</p> : null}
         </div>
 
         {current ? <div className="o-tx"><HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /></div> : null}

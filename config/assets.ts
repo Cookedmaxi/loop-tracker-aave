@@ -18,8 +18,8 @@ export interface LoopAsset {
   variableDebtToken?: Address;
   /** When the debt is spread over several assets (stablecoins): all of them. debtUnderlying is the one used for pricing. */
   debtAssets?: { symbol: string; address: Address }[];
-  /** Holders tracked for this asset. Defaults to TOP_HOLDERS. */
-  trackHolders?: number;
+  /** Most holders scanned for this asset (safety cap). Defaults to MAX_HOLDERS_SCANNED. */
+  maxHolders?: number;
 }
 
 export const WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -55,14 +55,21 @@ export const ASSETS: LoopAsset[] = [
     aToken: "0x2D62109243b87C4bA3EE7bA1D91B0dD0A074d7b1",
     variableDebtToken: "0xeA51d7853EEFb32b6ee06b1C12E6dcCA88Be0fFE",
   },
-  { symbol: "osETH", underlying: "0xf1C9acDc66974dFB6dEcB12aA385b9cD01190E38", trackHolders: 20 },
-  { symbol: "LBTC", underlying: "0x8236a87084f8B84306f72007F36F2618A5634494", ...STABLE_DEBT, trackHolders: 40 },
-  { symbol: "tBTC", underlying: "0x18084fbA666a33d37592fA2633fD49a74DD93a88", ...STABLE_DEBT, trackHolders: 40 },
-  { symbol: "rETH", underlying: "0xae78736Cd615f374D3085123A210448E74Fc6393", ...STABLE_DEBT, trackHolders: 40 },
+  { symbol: "osETH", underlying: "0xf1C9acDc66974dFB6dEcB12aA385b9cD01190E38" },
+  { symbol: "LBTC", underlying: "0x8236a87084f8B84306f72007F36F2618A5634494", ...STABLE_DEBT },
+  { symbol: "tBTC", underlying: "0x18084fbA666a33d37592fA2633fD49a74DD93a88", ...STABLE_DEBT },
+  { symbol: "rETH", underlying: "0xae78736Cd615f374D3085123A210448E74Fc6393", ...STABLE_DEBT },
 ];
 
-/** Holders tracked per asset, largest first. */
+/** Holders always shown, largest first, even without debt. */
 export const TOP_HOLDERS = 12;
+
+/** Every position backing at least this much debt is tracked. Holders are scanned from the largest
+ *  down to the smallest balance that could still back this much debt. */
+export const MIN_DEBT_USD = 10_000;
+
+/** Safety cap on holders scanned per asset. */
+export const MAX_HOLDERS_SCANNED = 1500;
 
 /** Health factors below this are flagged. */
 export const HF_ALERT = 1.03;

@@ -41,6 +41,8 @@ export interface Market {
   ltvPct: number;
   liquidationThresholdPct: number;
   frozen: boolean;
+  /** How the positions were found: every holder down to the smallest balance that could back minDebtUsd. */
+  scan?: { scanned: number; minDebtUsd: number; capped: boolean; withDebt: number };
   paused: boolean;
   active: boolean;
   supplyCap: number;           // 0 = no cap
