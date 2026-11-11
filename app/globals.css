@@ -223,3 +223,10 @@ a.asset-name { display: flex; }
 .dot.ok { background: #00c880; box-shadow: 0 0 0 3px color-mix(in srgb, #00c880 25%, transparent); }
 .dot.bad { background: #fc4434; }
 table.status td.finding { min-width: 260px; color: var(--muted); }
+
+/* team notes in the identity panel */
+.notes-list { display: grid; gap: 8px; }
+.notes-list .k { margin: 0; }
+.note-item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.note-item p { margin: 6px 0 0; font-size: 13px; line-height: 1.5; }
+.note-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }

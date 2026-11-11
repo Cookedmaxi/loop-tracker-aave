@@ -513,20 +513,14 @@ function HolderIdentity({ row, detail, colors, community }: { row: Row; detail: 
             <div className="kv"><span>Public labels</span><span>{detail?.publicTags.length ? detail.publicTags.join(", ") : "None found"}</span></div>
           </div>
           {detail?.notes.length ? (
-            <div className="scroll">
-              <table className="stack notes">
-                <thead><tr><th>Source</th><th>Finding</th><th>Linked to</th><th>Confidence</th></tr></thead>
-                <tbody>
-                  {detail.notes.map((n, i) => (
-                    <tr key={i}>
-                      <td className="top nw" data-label="Source">{n.source}</td>
-                      <td className="top finding" data-label="Finding">{n.finding}</td>
-                      <td className="top" data-label="Linked to"><EntityTag entity={n.linkedEntity} colors={colors} /></td>
-                      <td className="top nw" data-label="Confidence">{n.confidence}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="notes-list">
+              <p className="k">Team notes</p>
+              {detail.notes.map((n, i) => (
+                <div className="note-item" key={i}>
+                  <div className="note-meta"><EntityTag entity={n.linkedEntity} colors={colors} /><span>{n.source} · {n.confidence}</span></div>
+                  <p>{n.finding}</p>
+                </div>
+              ))}
             </div>
           ) : <p className="note">No team note on this wallet yet. Add one in data/notes.json.</p>}
           {community.length ? (
