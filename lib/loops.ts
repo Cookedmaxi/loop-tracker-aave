@@ -3,8 +3,9 @@
 import { AAVE_V3_CORE, ASSETS, HF_ALERT, TOP_HOLDERS, type Address, type LoopAsset } from "@/config/assets";
 import { cached } from "./cache";
 import { getAddressTransfers, getHolderCount, getTokenTransfers, getTopHolders, isZero, type RawTransfer } from "./blockscout";
-import { resolveReserve, type Reserve } from "./chain";
-import { aaveSource } from "./aave";
+import { readPositions, resolveReserve, type Reserve } from "./chain";
+import { readAaveMarket } from "./aave";
+import { hasTokenLogicKey, liquidations } from "./tokenlogic";
 import { tagOf } from "./tags";
 import type { LoopsResponse, Market, Position, Tx } from "./types";
 
@@ -20,9 +21,13 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
     const [holders, holderCount, m] = await Promise.all([
       getTopHolders(reserve.aToken, TOP_HOLDERS),
       getHolderCount(reserve.aToken).catch(() => null),
-      aaveSource().readMarket(reserve),
+      readAaveMarket(reserve),
     ]);
-    const chain = await aaveSource().readPositions(reserve, holders.map((h) => h.address));
+    const [chain, liqs] = await Promise.all([
+      readPositions(reserve, holders.map((h) => h.address)),
+      // Liquidations of the last 90 days on the market, from the TokenLogic API (key needed).
+      hasTokenLogicKey() ? liquidations(AAVE_V3_CORE.marketKey, new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)).catch(() => []) : Promise.resolve([]),
+    ]);
     const rate = m.debtPriceUsd ? m.priceUsd / m.debtPriceUsd : 0;
 
     const positions: Position[] = chain.map((p, i) => {
@@ -47,6 +52,10 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
         leverage: equity > 0 && p.totalDebtUsd > 0 ? p.totalCollateralUsd / equity : null,
         dropToLiquidationPct: hf && hf > 1 ? (1 - 1 / hf) * 100 : null,
         alert: hf !== null && hf < HF_ALERT,
+        liquidations: liqs.filter((l) => l.user_liquidated?.toLowerCase() === p.address.toLowerCase()).map((l) => ({
+          timestamp: l.timestamp, txHash: l.tx_hash, collateralSymbol: l.collateral_symbol, collateralAmount: Number(l.collateral_amount),
+          debtSymbol: l.debt_symbol, debtAmount: Number(l.debt_amount), debtUsd: Number(l.debt_usd),
+        })),
       };
     });
 
@@ -68,6 +77,8 @@ export function getLoops(asset: LoopAsset, fresh = false): Promise<LoopsResponse
       netEquityInDebtAsset: collateralInDebtAsset ? collateralInDebtAsset - trackedDebt : null,
       underAlert: positions.filter((p) => p.alert).length,
       top1SharePct: share(1), top3SharePct: share(3), top10SharePct: share(10),
+      source: m.source, supplyApy: m.supplyApy, debtBorrowApy: m.debtBorrowApy, utilization: m.utilization, borrowedTokens: m.borrowedTokens,
+      dataAsOf: m.dataAsOf, notes: m.notes, liquidations90d: liqs.length,
     };
     return { asset: asset.symbol, asOf: new Date().toISOString(), market, positions };
   }, fresh);

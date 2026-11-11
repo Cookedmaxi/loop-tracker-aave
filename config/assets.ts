@@ -22,6 +22,10 @@ export const WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 
 export const AAVE_V3_CORE = {
   name: "Aave V3 Core",
+  /** TokenLogic API names for this instance. */
+  marketKey: "ethereum-core-v3",
+  ratesMarket: "Aave V3",
+  chain: "ethereum",
   pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2" as Address,
   oracle: "0x54586bE62E3c3580375aE3723C145253060Ca0C2" as Address,
 };

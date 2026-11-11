@@ -125,7 +125,6 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
 .asset-pick select:focus-visible { outline: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .big .v, .big .hf { white-space: nowrap; }
-.big .meter { width: 36px; }
 
 /* ── phones and narrow windows ── */
 @media (max-width: 900px) {
@@ -200,3 +199,12 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
   .brand img { height: 18px; }
   .kv { flex-wrap: wrap; }
 }
+/* Position card: values line up at the bottom of each cell whatever the label length;
+   the health-factor colour carries the meaning, so the small bar is dropped here. */
+.big .cell { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; }
+.big .k { margin: 0; }
+.big .meter { display: none; }
+.big .hf { justify-content: flex-start; gap: 0; }
+.badge { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; vertical-align: 1px; }
+.badge.bad { color: var(--red); }
+.note.warn { color: var(--yellow); }

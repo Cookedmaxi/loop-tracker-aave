@@ -22,6 +22,7 @@ export interface Position {
   leverage: number | null;
   dropToLiquidationPct: number | null;
   alert: boolean;
+  liquidations: { timestamp: string; txHash: string; collateralSymbol: string; collateralAmount: number; debtSymbol: string; debtAmount: number; debtUsd: number }[];
 }
 
 export interface Market {
@@ -57,6 +58,15 @@ export interface Market {
   top1SharePct: number;
   top3SharePct: number;
   top10SharePct: number;
+  // From the TokenLogic API where available:
+  source: "TokenLogic API" | "On-chain"; // where supply and prices come from
+  supplyApy: number | null;      // %, collateral asset
+  debtBorrowApy: number | null;  // %, debt asset
+  utilization: number | null;    // %, collateral asset
+  borrowedTokens: number | null;
+  dataAsOf: string | null;
+  notes: string[];
+  liquidations90d: number;       // liquidations on the whole market, last 90 days (0 without a key)
 }
 
 export interface LoopsResponse { asset: string; asOf: string; market: Market; positions: Position[] }

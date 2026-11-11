@@ -306,6 +306,7 @@ function LoopsTab(props: {
             <Cell label={`${m.debtSymbol} borrowed`} value={fmt(m.trackedDebt)} sub={usd(m.trackedDebtUsd)} />
             <Cell label="Debt ÷ collateral" value={pct(m.debtToCollateralPct)} />
             <Cell label={`Health factor below ${hfAlert.toFixed(2)}`} value={fmt(m.underAlert)} tone={m.underAlert ? "bad" : ""} sub="tracked holders" />
+            <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="cost of the loop · TokenLogic" />
           </div>
         );
       })}
@@ -341,6 +342,7 @@ function LoopsTab(props: {
                         {many ? <td className="nw" data-label="Asset">{asset}</td> : null}
                         <td className="who">
                           <button className="rowbtn" aria-pressed={on} onClick={(e) => { e.stopPropagation(); onPick(asset, p.address); }}>{holderName(p)}</button>
+                          {p.liquidations?.length ? <span className="badge bad" title="Liquidated in the last 90 days, per the TokenLogic API">Liquidated</span> : null}
                           <span className="sub">{short(p.address)}</span>
                         </td>
                         <td className="tagcell">{p.tag ? <EntityTag entity={p.tag.entity} colors={colors} /> : <EntityTag entity={communityOf.get(p.address.toLowerCase())?.entity} colors={colors} community />}</td>
@@ -401,6 +403,10 @@ function PositionCard({ row, market, hfAlert, colors }: { row: Row; market?: Mar
           <div className="kv"><span>All collateral on Aave</span><span>{usd(p.totalCollateralUsd)}</span></div>
           <div className="kv"><span>All debt on Aave</span><span>{usd(p.totalDebtUsd)}</span></div>
           <div className="kv"><span>Net equity</span><span>{usd(p.totalCollateralUsd - p.totalDebtUsd)}</span></div>
+          {p.liquidations?.length ? p.liquidations.map((l) => (
+            <div className="kv" key={l.txHash}><span className="bad">Liquidated {when(l.timestamp)}</span>
+              <span><a className="link" href={`https://etherscan.io/tx/${l.txHash}`} target="_blank" rel="noopener noreferrer">{fmtAmount(l.collateralAmount)} {l.collateralSymbol} seized · {usd(l.debtUsd)} repaid</a></span></div>
+          )) : null}
           <div className="kv"><span>Position</span><span>{p.loops ? `${asset}/${debtSymbol} loop` : p.totalDebtUsd > 0 ? "Borrows other assets" : "Supply only"}</span></div>
         </div>
       </div>
@@ -517,7 +523,18 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
               <Cell label="Max LTV" value={pct(m.ltvPct, 2)} sub="outside e-mode" />
               <Cell label="Liquidation threshold" value={pct(m.liquidationThresholdPct, 2)} sub="outside e-mode" />
               <Cell label="Supply cap" value={m.supplyCap ? fmt(m.supplyCap) : "None"} />
-              <Cell label={`${a.symbol} price`} value={`$${fmt(m.priceUsd, 2)}`} sub="Aave oracle" />
+              <Cell label={`${a.symbol} price`} value={`$${fmt(m.priceUsd, 2)}`} sub={m.source === "TokenLogic API" ? "TokenLogic API" : "Aave oracle"} />
+              <Cell label={`${a.symbol} supply APY`} value={pct(m.supplyApy, 2)} sub="TokenLogic" />
+              <Cell label={`${m.debtSymbol} borrow APY`} value={pct(m.debtBorrowApy, 2)} sub="TokenLogic" />
+              {m.utilization !== null ? <Cell label="Utilization" value={pct(m.utilization, 1)} sub={m.borrowedTokens !== null ? `${fmt(m.borrowedTokens)} ${a.symbol} borrowed` : undefined} /> : null}
+              {m.source === "TokenLogic API" ? <Cell label="Liquidations, 90 days" value={fmt(m.liquidations90d)} sub="whole market · TokenLogic" tone={m.liquidations90d ? "warn" : ""} /> : null}
+            </div>
+            <div className="body">
+              <p className="note">
+                Supply, prices and rates: {m.source === "TokenLogic API" ? `TokenLogic API${m.dataAsOf ? `, updated ${when(m.dataAsOf)}` : ""}` : "on-chain, with rates from TokenLogic’s public endpoint"}.
+                Reserve settings and positions: on-chain.
+              </p>
+              {m.notes.map((n) => <p className="note warn" key={n}>{n}</p>)}
             </div>
           </div>
         );
