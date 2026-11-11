@@ -570,11 +570,10 @@ function MarketTab({ shown, loops, busy, logoOf }: { shown: Shown; loops: Record
 
 // ── Last tx ─────────────────────────────────────────────────────────────────
 
-type TxFilter = "all" | "holders" | "holders_asset" | "entities";
+type TxFilter = "all" | "holders" | "entities";
 const TX_FILTERS: { id: TxFilter; label: string }[] = [
   { id: "all", label: "All market" },
   { id: "holders", label: "Tracked holders" },
-  { id: "holders_asset", label: "Holders · loop only" },
   { id: "entities", label: "Tagged entities" },
 ];
 
@@ -586,6 +585,7 @@ function TxTab(props: {
   const [holder, setHolder] = useState("");
   const [entity, setEntity] = useState("");
   const [type, setType] = useState("");
+  const [loopOnly, setLoopOnly] = useState(true);
 
   const all = useMemo(() => {
     const seen = new Set<string>();
@@ -600,7 +600,7 @@ function TxTab(props: {
 
   const rows = all.filter((t) => {
     if (filter === "holders" && !t.walletRank) return false;
-    if (filter === "holders_asset" && !(t.walletRank && t.assetRelated)) return false;
+    if (loopOnly && !t.assetRelated) return false;
     if (filter === "entities" && !t.counterpartyTag) return false;
     if (holder && t.wallet.toLowerCase() !== holder) return false;
     if (entity && t.counterpartyTag?.entity !== entity && t.walletTag?.entity !== entity) return false;
@@ -618,6 +618,10 @@ function TxTab(props: {
         <div className="seg" role="group" aria-label="Transactions shown">
           {TX_FILTERS.map((f) => <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</button>)}
         </div>
+        <div className="seg" role="group" aria-label="Tokens shown">
+          <button aria-pressed={loopOnly} onClick={() => setLoopOnly(true)}>{shown.length === 1 ? `${shown[0].symbol} loop only` : "Loop only"}</button>
+          <button aria-pressed={!loopOnly} onClick={() => setLoopOnly(false)}>All tokens</button>
+        </div>
         <select aria-label="Holder" value={holder} onChange={(e) => setHolder(e.target.value)}>
           <option value="">All holders</option>
           {positions.map(({ asset, p }) => <option key={`${asset}:${p.address}`} value={p.address.toLowerCase()}>#{p.rank} {holderName(p)} · {short(p.address)}</option>)}
@@ -634,11 +638,11 @@ function TxTab(props: {
       {error ? <p className="empty">Could not load transactions: {error} <button className="chip plain" onClick={onRetry}>Try again</button></p>
         : busy && !all.length ? <p className="empty">Reading transactions for {shown.length ? shown.map((a) => a.symbol).join(", ") : "the selected assets"}…</p>
         : rows.length ? <TxTable rows={rows} colors={colors} showWallet />
-        : <p className="empty">{all.length ? "No transaction matches these filters." : "No recent transaction found."}</p>}
+        : <p className="empty">{all.length ? (loopOnly ? "No loop transaction matches these filters. Switch to all tokens to see the holders’ other activity." : "No transaction matches these filters.") : "No recent transaction found."}</p>}
       <div className="body">
         <p className="note">
-          All market: the latest supplies, withdrawals and transfers on the selected markets. Tracked holders: the latest token transfers of each tracked holder, on any token.
-          Holders · loop only: those that touch the loop’s collateral or debt. Tagged entities: transfers whose counterparty is one of the team’s tagged addresses.
+          Loop only (default): Aave actions and transfers that touch the loop: the collateral and its aToken, the borrowed asset and its debt token, and liquidations. All tokens adds the holders’ other transfers.
+          All market: every wallet on the selected market. Tracked holders: the top holders only. Tagged entities: transactions whose counterparty is one of the tagged addresses.
         </p>
       </div>
     </div>
