@@ -23,7 +23,7 @@ function holderList(asset: LoopAsset, reserve: Reserve, priceUsd: number) {
   const cap = asset.maxHolders ?? MAX_HOLDERS_SCANNED;
   const value = (async () => {
     const decimals = await tokenDecimals(reserve.aToken);
-    const list = await getTopHolders(reserve.aToken, cap, priceUsd > 0 ? MIN_DEBT_USD / priceUsd : 0, decimals);
+    const list = await getTopHolders(reserve.aToken, cap, priceUsd > 0 ? MIN_DEBT_USD / priceUsd : 0, decimals, TOP_HOLDERS);
     return { list, capped: list.length >= cap };
   })().catch((e) => { holderCache.delete(asset.symbol); throw e; });
   holderCache.set(asset.symbol, { at: Date.now(), value });

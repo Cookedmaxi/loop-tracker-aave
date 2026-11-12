@@ -19,7 +19,7 @@ const hashOf = (a: any): Address | null => (a?.hash ?? a ?? null) as Address | n
 export interface Holder { address: Address; isContract: boolean; name: string | null; ens: string | null; balance: number | null }
 
 /** Top holders of a token, largest first; stops at `limit` or below `minBalance` (in tokens). */
-export async function getTopHolders(token: Address, limit: number, minBalance = 0, decimals = 18): Promise<Holder[]> {
+export async function getTopHolders(token: Address, limit: number, minBalance = 0, decimals = 18, keepAtLeast = 0): Promise<Holder[]> {
   const out: Holder[] = [];
   let query = "";
   while (out.length < limit) {
@@ -30,7 +30,8 @@ export async function getTopHolders(token: Address, limit: number, minBalance = 
       if (!raw || raw.toLowerCase() === ZERO) continue;
       const address = getAddress(raw.toLowerCase()); // normalise the checksum
       const balance = it.value != null ? Number(it.value) / 10 ** decimals : null;
-      if (minBalance && balance != null && balance < minBalance) return out; // sorted largest first
+      // Sorted largest first: stop below minBalance, once the largest `keepAtLeast` holders are in.
+      if (minBalance && balance != null && balance < minBalance && out.length >= keepAtLeast) return out;
       out.push({ address, isContract: Boolean(a.is_contract), name: a.name ?? null, ens: a.ens_domain_name ?? null, balance });
       if (out.length >= limit) break;
     }
