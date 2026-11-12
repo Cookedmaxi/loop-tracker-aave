@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KELP_INPUTS } from "@/config/kelp";
+import * as KM from "@/lib/kelp-model";
 import type { CommunityTag, Entity, HolderDetail, LookupResponse, LoopsResponse, MappingHolder, MappingResponse, Market, PlanResponse, Position, RiskResponse, Tag, Tx } from "@/lib/types";
 
 // ── small helpers ───────────────────────────────────────────────────────────
@@ -932,6 +934,8 @@ function PlanTab({ shown, logoOf, onPick, onAll }: { shown: Shown; logoOf: (s: s
       </div>
 
       <OffboardingCalendar plans={[plan]} baselineDate={b.date} title={`${plan.symbol} exposure, day by day`} />
+
+      {plan.symbol === "rsETH" ? <KelpPanel /> : null}
 
       {plan.path === "lt" && plan.ltSim ? <LtSimPanel plan={plan} /> : null}
       {plan.path === "rate" ? (
@@ -2345,6 +2349,96 @@ function LookupPanel({ query, logoOf, colors, onClose, onOpen }: { query: string
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+
+// ── Kelp revenue model (rsETH) ──────────────────────────────────────────────
+
+function KelpPanel() {
+  const K = KELP_INPUTS;
+  const coreRseth = K.positions.reduce((s, p) => s + p.rseth, 0) + 259; // + #11, the Contango loop
+  const coreDebt = K.markets[0].wethDebt as number;
+  const allRseth = K.markets.reduce((s, m) => s + m.rseth, 0);
+  const allDebt = K.markets.reduce((s, m) => s + (m.wethDebt ?? 0), 0);
+  const [caseKey, setCase] = useState<keyof typeof K.unwind>("base");
+  const [scope, setScope] = useState<"core" | "all">("core");
+  const [y, setY] = useState<number>(K.yields.baseNet);
+  const [feeBps, setFee] = useState<number>(K.feeBps);
+  const p: KM.KelpParams = {
+    rseth: scope === "core" ? coreRseth : allRseth, rsethEth: K.rsethEth, ethUsd: K.ethUsd, netYieldPct: y, feeBps,
+    unwindDays: K.unwind[caseKey], cycleDays: K.cycleDays, fastExitDays: K.fastExitDays, horizonDays: K.horizonDays,
+    wethDebt: scope === "core" ? coreDebt : allDebt,
+  };
+  const s = KM.scenarios(p);
+  const sched = KM.schedule(p);
+  const eth = (v: number) => `${fmt(v, v < 100 ? 1 : 0)} ETH`;
+  const isoB = KM.isolatedBorrow(K.weth.supplyApy, K.isolated.utilization, K.isolated.reserveFactor);
+  const cut = KM.rateCutPct(s.gap, p);
+  const L = 11.8;
+  const opts: [string, number][] = [
+    ["Core today", K.weth.borrowApy], ["Core after +50 bps", K.weth.borrowApy + 0.5], ["Core after +100 bps", K.weth.borrowApy + 1],
+    ["Isolated market", isoB], ["Isolated + Kelp gap as incentive", isoB - cut],
+  ];
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div><p className="eyebrow">Kelp revenue model</p><h2>What Kelp earns on the loops: stall, fast exit or migration</h2></div>
+        <p className="hint">Inputs read {dayLabel(K.asOf)}</p>
+      </div>
+      <div className="strip inner">
+        <Cell label="Kelp fee" value={`${feeBps / 100}% of rewards`} sub="LRTConfig on-chain (docs say 10%)" />
+        <Cell label="rsETH yield, net" value={pct(y, 2)} sub={`stETH ${pct(K.yields.stethApr7d, 2)} · 30d ${pct(K.yields.rsethNet30d, 2)} · 90d ${pct(K.yields.rsethNet90d, 2)}`} />
+        <Cell label="Kelp fee on the loops" value={eth(s.annualFullTvl)} sub={`${usd(s.annualFullTvl * K.ethUsd)} a year at full TVL`} />
+        <Cell label="Aave share of rsETH" value={pct((allRseth / K.rsethSupply) * 100, 0)} sub={`${fmt(allRseth)} of ${fmt(K.rsethSupply)} rsETH`} />
+        <Cell label="Fee minted, 30 days" value={`${fmt(K.feeMinted.d30, 1)} rsETH`} sub="LRTOracle FeeMinted events" />
+      </div>
+      <div className="body kelp-controls">
+        <div className="seg" role="group" aria-label="Unwind case">
+          {(Object.keys(K.unwind) as (keyof typeof K.unwind)[]).map((k) => <button key={k} aria-pressed={caseKey === k} onClick={() => setCase(k)}>{k === "assisted" ? "Kelp-assisted" : k === "base" ? "Base" : "Slow"} · {K.unwind[k]} d</button>)}
+        </div>
+        <div className="seg" role="group" aria-label="Scope">
+          <button aria-pressed={scope === "core"} onClick={() => setScope("core")}>Core loops</button>
+          <button aria-pressed={scope === "all"} onClick={() => setScope("all")}>All rsETH on Aave</button>
+        </div>
+        <div className="seg" role="group" aria-label="Yield">
+          {[K.yields.rsethNet90d, K.yields.baseNet, K.yields.rsethNet30d].map((v) => <button key={v} aria-pressed={y === v} onClick={() => setY(v)}>{pct(v, 2)}</button>)}
+        </div>
+        <div className="seg" role="group" aria-label="Fee">
+          {[500, 1000].map((v) => <button key={v} aria-pressed={feeBps === v} onClick={() => setFee(v)}>Fee {v / 100}%</button>)}
+        </div>
+      </div>
+      <div className="scroll">
+        <table className="stack overview">
+          <thead><tr><th>Next 12 months</th><th className="r">Kelp's fee</th><th className="r">USD</th><th>What happens</th></tr></thead>
+          <tbody>
+            <tr><td className="nw"><strong>A · Kelp stalls</strong></td><td className="r" data-label="Fee">{eth(s.A)}</td><td className="r" data-label="USD">{usd(s.A * K.ethUsd)}</td><td data-label="What">Loops unwind through Kelp's queue, one batch every {K.cycleDays} days, gone by day {K.unwind[caseKey]}</td></tr>
+            <tr><td className="nw"><strong>B1 · Fast exit</strong></td><td className="r" data-label="Fee">{eth(s.B1)}</td><td className="r" data-label="USD">{usd(s.B1 * K.ethUsd)}</td><td data-label="What">A bridge loan clears the loops in about {K.fastExitDays} days; the TVL leaves Kelp</td></tr>
+            <tr><td className="nw"><strong>B2 · Migration</strong></td><td className="r" data-label="Fee">{eth(s.B2)}</td><td className="r" data-label="USD">{usd(s.B2 * K.ethUsd)}</td><td data-label="What">Loops move to an isolated rsETH market on Aave; Kelp keeps the TVL</td></tr>
+            <tr className="total"><td>Gap A − B1</td><td className="r" data-label="Fee">{eth(s.gap)}</td><td className="r" data-label="USD">{usd(s.gap * K.ethUsd)}</td><td data-label="What">What Kelp gains by stalling, and the most we can ask it to give back</td></tr>
+            <tr className="total"><td>Migration gain B2 − A</td><td className="r" data-label="Fee">{eth(s.migrationGain)}</td><td className="r" data-label="USD">{usd(s.migrationGain * K.ethUsd)}</td><td data-label="What">What Kelp gains by migrating instead of stalling, in year one</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="two-inner">
+        <div className="body">
+          <p className="k">Unwind, cycle by cycle ({caseKey === "assisted" ? "Kelp-assisted" : caseKey})</p>
+          <table className="mini">
+            <thead><tr><th>Cycle</th><th className="r">Day</th><th className="r">Redeemed</th><th className="r">rsETH left</th><th className="r">Kelp fee</th></tr></thead>
+            <tbody>{sched.map((c) => <tr key={c.cycle}><td>{c.cycle}</td><td className="r">{c.endDay}</td><td className="r">{fmt(c.redeemed)}</td><td className="r">{fmt(c.rsethEnd)}</td><td className="r">{fmt(c.feeEth, 1)}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className="body">
+          <p className="k">Isolated market: WETH rate and loop return at {L}x</p>
+          <table className="mini">
+            <thead><tr><th>Option</th><th className="r">WETH borrow</th><th className="r">Spread</th><th className="r">Return on equity</th></tr></thead>
+            <tbody>{opts.map(([n, b]) => { const r = KM.roe(L, y, b); return <tr key={n}><td>{n}</td><td className="r">{pct(b, 2)}</td><td className="r">{fmt((y - b) * 100, 0)} bps</td><td className={`r ${r < 0 ? "neg" : n.startsWith("Isolated") ? "pos" : ""}`}>{pct(r, 1)}</td></tr>; })}</tbody>
+          </table>
+          <p className="note">The gap as an incentive cuts the borrow rate by {fmt(cut * 100, 1)} bps. The isolated market pays lenders Core's {pct(K.weth.supplyApy, 2)} at {K.isolated.utilization}% utilization and a {K.isolated.reserveFactor}% reserve factor; it needs about {fmt(p.wethDebt / (K.isolated.utilization / 100))} WETH of lenders.</p>
+        </div>
+      </div>
+      <p className="note body">Cycle length and range from Dialectic; equal batches rebuilt from them. Fee from the contract (5%), not the docs (10%). Kelp's instant-withdrawal fee (0.5%, switched off for ETH) is not in these figures.</p>
     </div>
   );
 }

@@ -447,3 +447,9 @@ tr.dim td { opacity: .45; }
 .lookup-meta { flex-direction: row; justify-content: flex-start; text-align: left; }
 .master-list .panel-head { gap: 10px; flex-wrap: wrap; }
 @media (max-width: 700px) { .master-list .head-actions { width: 100%; } .master-list .search { flex: 1; } .master-list .search input { width: 100%; } }
+.kelp-controls { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.mini th, table.mini td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; font-variant-numeric: tabular-nums; }
+table.mini th { color: var(--muted); font-weight: 500; }
+table.mini .r { text-align: right; }
+td.pos { color: var(--green); }
