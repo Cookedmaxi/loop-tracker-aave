@@ -24,8 +24,8 @@ const poolAbi = parseAbi([
 ]);
 
 const FAMILY: Record<string, "ETH" | "BTC"> = {
-  WETH: "ETH", wstETH: "ETH", weETH: "ETH", cbETH: "ETH", rsETH: "ETH", osETH: "ETH", rETH: "ETH",
-  WBTC: "BTC", cbBTC: "BTC", LBTC: "BTC", tBTC: "BTC",
+  WETH: "ETH", wstETH: "ETH", weETH: "ETH", cbETH: "ETH", rsETH: "ETH", osETH: "ETH", rETH: "ETH", tETH: "ETH",
+  WBTC: "BTC", cbBTC: "BTC", LBTC: "BTC", tBTC: "BTC", eBTC: "BTC", "BTC.b": "BTC",
 };
 
 interface ReserveInfo { symbol: string; asset: Address; aToken: Address; debtToken: Address; decimals: number; price: number; debtSupply: number }

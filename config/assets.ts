@@ -45,6 +45,8 @@ const STABLE_DEBT = {
     { symbol: "USDT", address: "0xdAC17F958D2ee523a2206206994597C13D831ec7" as Address },
     { symbol: "DAI", address: "0x6B175474E89094C44Da98b954EedeAC495271d0F" as Address },
     { symbol: "GHO", address: "0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f" as Address },
+    { symbol: "USDe", address: "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3" as Address },
+    { symbol: "USDS", address: "0xdC035D45d973E3EC169d2276DDab16f1e407384F" as Address },
   ],
 };
 
@@ -59,6 +61,13 @@ export const ASSETS: LoopAsset[] = [
   { symbol: "LBTC", underlying: "0x8236a87084f8B84306f72007F36F2618A5634494", ...STABLE_DEBT },
   { symbol: "tBTC", underlying: "0x18084fbA666a33d37592fA2633fD49a74DD93a88", ...STABLE_DEBT },
   { symbol: "rETH", underlying: "0xae78736Cd615f374D3085123A210448E74Fc6393", ...STABLE_DEBT },
+  // Lower-exposure reserves frozen by the final ARFC (run-off, no follow-up controls).
+  { symbol: "eBTC", underlying: "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642", ...STABLE_DEBT },
+  { symbol: "BTC.b", underlying: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", ...STABLE_DEBT },
+  { symbol: "tETH", underlying: "0xD11c452fc99cF405034ee446803b6F6c1F6d5ED8", ...STABLE_DEBT },
+  { symbol: "PT-srUSDe-22OCT2026", underlying: "0x59bC9FaE5D62B19d4f8d07D758047aCb9EE19d34", ...STABLE_DEBT },
+  { symbol: "LDO", underlying: "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32", ...STABLE_DEBT },
+  { symbol: "mUSD", underlying: "0xacA92E438df0B2401fF60dA7E4337B687a2435DA", ...STABLE_DEBT },
 ];
 
 /** Holders always shown, largest first, even without debt. */

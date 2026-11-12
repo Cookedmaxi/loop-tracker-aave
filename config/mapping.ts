@@ -25,6 +25,9 @@ export const DEBT_RESERVES: { symbol: string; address: Address }[] = [
   { symbol: "RLUSD", address: "0x8292Bb45bf1Ee4d140127049757C2E0fF06317eD" },
   { symbol: "EURC", address: "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c" },
   { symbol: "PYUSD", address: "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8" },
+  { symbol: "mUSD", address: "0xacA92E438df0B2401fF60dA7E4337B687a2435DA" },
+  { symbol: "WBTC", address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599" },
+  { symbol: "cbBTC", address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" },
 ];
 
 /** Other collateral read per borrower (aToken balance). */
@@ -43,4 +46,9 @@ export const COLLATERAL_RESERVES: { symbol: string; address: Address }[] = [
   { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
   { symbol: "USDT", address: "0xdAC17F958D2ee523a2206206994597C13D831ec7" },
   { symbol: "sUSDe", address: "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497" },
+  { symbol: "eBTC", address: "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642" },
+  { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072" },
+  { symbol: "tETH", address: "0xD11c452fc99cF405034ee446803b6F6c1F6d5ED8" },
+  { symbol: "PT-srUSDe-22OCT2026", address: "0x59bC9FaE5D62B19d4f8d07D758047aCb9EE19d34" },
+  { symbol: "LDO", address: "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32" },
 ];

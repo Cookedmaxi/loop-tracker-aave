@@ -150,4 +150,95 @@ export const ASSET_PLANS: Record<string, AssetPlan> = {
       "Supply has held between 31.6k and 41.5k rETH over the past year.",
     ],
   },
+  "eBTC": {
+    resolution: "Freeze, run off",
+    path: "lt",
+    pathLabel: "Frozen; positions run off, no follow-up controls",
+    baseline: { date: "2026-11-09", collateralUsd: 5.5e6, debtUsd: 2.1e6, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "eBTC frozen on Core (LTV 67% → 0)", detect: { kind: "frozen" } },
+      { stage: "Natural unwinding", label: "Existing positions run off; no LT cuts or rate steps planned", note: "The ARFC expects the freeze to be enough for these lower-exposure reserves." },
+    ],
+    notes: [
+      "LTV 67% today; stablecoins are borrowed against it. One of the reserves exempted for three months in earlier rounds.",
+    ],
+  },
+  "BTC.b": {
+    resolution: "Freeze, run off",
+    path: "lt",
+    pathLabel: "Frozen; positions run off, no follow-up controls",
+    baseline: { date: "2026-11-09", collateralUsd: 1.2e6, debtUsd: 0.5e6, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "BTC.b frozen on Core (LTV 73% → 0)", detect: { kind: "frozen" } },
+      { stage: "Natural unwinding", label: "Existing positions run off; no LT cuts or rate steps planned", note: "The ARFC expects the freeze to be enough for these lower-exposure reserves." },
+    ],
+    notes: [
+      "LTV 73% today; stablecoins are borrowed against it. BTC.b stays available on the Avalanche instance, where it is the main BTC asset.",
+    ],
+  },
+  "tETH": {
+    resolution: "Freeze, run off",
+    path: "lt",
+    pathLabel: "Frozen; positions run off, no follow-up controls",
+    baseline: { date: "2026-11-09", collateralUsd: 0.8e6, debtUsd: 0.3e6, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "tETH frozen on Core (72% E-Mode LTV → 0)", detect: { kind: "frozen" } },
+      { stage: "Natural unwinding", label: "Existing positions run off; no LT cuts or rate steps planned", note: "The ARFC expects the freeze to be enough for these lower-exposure reserves." },
+    ],
+    notes: [
+      "LTV 0% outside E-Mode; the freeze also sets its 72% E-Mode LTV to 0.",
+    ],
+  },
+  "PT-srUSDe-22OCT2026": {
+    resolution: "Freeze, run off",
+    path: "lt",
+    pathLabel: "Frozen; positions run off, no follow-up controls",
+    baseline: { date: "2026-11-09", collateralUsd: 0.01e6, debtUsd: 0.01e6, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "PT-srUSDe-22OCT2026 frozen on Core", detect: { kind: "frozen" } },
+      { stage: "Natural unwinding", label: "Existing positions run off; no LT cuts or rate steps planned", note: "The ARFC expects the freeze to be enough for these lower-exposure reserves." },
+    ],
+    notes: [
+      "Pendle PT that matured on 22 October 2026; LTV already 0%.",
+    ],
+  },
+  "LDO": {
+    resolution: "Freeze, run off",
+    path: "lt",
+    pathLabel: "Frozen; positions run off, no follow-up controls",
+    baseline: { date: "2026-11-09", collateralUsd: 0.06e6, debtUsd: 0.01e6, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "LDO frozen on Core", detect: { kind: "frozen" } },
+      { stage: "Natural unwinding", label: "Existing positions run off; no LT cuts or rate steps planned", note: "The ARFC expects the freeze to be enough for these lower-exposure reserves." },
+    ],
+    notes: [
+      "Governance token; LTV already 0%.",
+    ],
+  },
+  "mUSD": {
+    resolution: "Freeze, reserve factor up",
+    path: "lt",
+    pathLabel: "Borrowable only; frozen, reserve factor to 99%",
+    baseline: { date: "2026-11-09", collateralUsd: 0, debtUsd: 21.2e3, revenueUsd: 0 },
+    eModes: [],
+    swapInto: [],
+    steps: [
+      { stage: "Initial measures", label: "mUSD frozen on Core", detect: { kind: "frozen" } },
+      { stage: "Initial measures", label: "mUSD reserve factor 20% → 99% (debt above the $20k threshold, about $21.2k)", detect: { kind: "reserveFactorAtLeast", pct: 99 } },
+      { stage: "Natural unwinding", label: "Borrowers repay; mUSD stays borrowable" },
+    ],
+    notes: [
+      "Not used as collateral: the exposure is mUSD borrowed, not mUSD supplied.",
+    ],
+  },
 };
