@@ -126,5 +126,9 @@
   {"match": "0x31a0ba3c2242a095dbf58a7c53751ecbd27dba9b", "label": "Aave Dust Bin (EtherFi market)", "entity": "Aave", "kind": "Treasury"},
   {"match": "0xcb09ab3f6254437d225ed3cabebe0949782e2372", "label": "Aave new-listing seed contributor", "entity": "Aave", "kind": "Supply only"},
   {"match": "0xbdfa4f4492dd7b7cf211209c4791af8d52bf5c50", "label": "@bizyugo (TokenLogic label)", "entity": "@bizyugo", "kind": "Borrower"},
-  {"match": "0x44e8c2451e916c87dde3977dc80f6fb8a1e33b1d", "label": "@deerhunterseth (TokenLogic label)", "entity": "@deerhunterseth", "kind": "Borrower"}
+  {"match": "0x44e8c2451e916c87dde3977dc80f6fb8a1e33b1d", "label": "@deerhunterseth (TokenLogic label)", "entity": "@deerhunterseth", "kind": "Borrower"},
+  {"match": "0xbcd20ddb6dee1779cdfee046ea036fd6b306834d", "label": "Contango position (AaveMoneyMarket beacon proxy)", "entity": "Contango user", "kind": "Borrower"},
+  {"match": "0x0af56afbddcb140323445bd7211ba90e54e5fd1c", "label": "Aave V3 static aToken wrapper", "entity": "Aave", "kind": "Supply only"},
+  {"match": "0xd22c061a1ee043c75f642fcfb643f9541997fb85", "label": "Walled Fund Liquid · Enzyme vault", "entity": "Walled Fund", "kind": "Supply only"},
+  {"match": "0x0000030d7a7c4888851f35705b0852cf20ac1ba6", "label": "rezerve.eth · Aragon treasury", "entity": "Rezerve", "kind": "Borrower"}
 ]

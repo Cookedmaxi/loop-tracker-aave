@@ -150,5 +150,21 @@
     "status": "tBTC #7, about $2.4M of stablecoin debt. Label: TokenLogic data repo (tokenlogic-data-sqlmesh seeds) (aave_positions_wallet_labels).",
     "website": "",
     "x": "https://x.com/deerhunterseth"
+  },
+  {
+    "entity": "Walled Fund",
+    "kind": "Fund · Enzyme vault",
+    "approach": "Contact the vault manager through Enzyme",
+    "status": "Enzyme vault 'Walled Fund Liquid' (VaultLib) holds LDO on Core, no debt.",
+    "website": "",
+    "x": ""
+  },
+  {
+    "entity": "Rezerve",
+    "kind": "DAO treasury · Aragon",
+    "approach": "Contact the DAO",
+    "status": "rezerve.eth, an Aragon AppTreasury, borrows USDC against eBTC on Core (eBTC #15).",
+    "website": "",
+    "x": ""
   }
 ]
