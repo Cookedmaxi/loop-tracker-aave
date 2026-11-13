@@ -35,7 +35,7 @@ export async function buildReport(only?: string): Promise<{ markdown: string; mo
   L.push(only ? `# ${only} offboarding on Aave V3 Core: report, ${month}` : `# Repositioning Aave V3 Core: progress report, ${month}`, "");
   L.push(`Reporting date: ${day(now.toISOString())}. Baseline: the [ARFC](${PLAN.url}) figures of ${day(plans[0]?.baseline.date ?? "2026-11-09")}. Positions, debt, rates and parameter changes are read on-chain from Aave V3 Ethereum Core.`, "");
   L.push("## Summary", "");
-  L.push(`The collateral in scope backs ${usd(nowDebt)} of debt, against ${usd(baseDebt)} at the baseline (${pct(baseDebt ? (nowDebt / baseDebt - 1) * 100 : null)}). Exposure declined over the past 30 days for ${declining} of ${plans.length} assets. ${applied.length ? `Follow-up controls have been applied to ${applied.map((p) => p.symbol).join(", ")}.` : "No follow-up control has been applied."}`, "");
+  L.push(`The collateral in scope backs ${usd(nowDebt)} of debt, against ${usd(baseDebt)} at the baseline (${pct(baseDebt ? (nowDebt / baseDebt - 1) * 100 : null)}). ${only ? (plans[0]?.trend.declining ? "Exposure declined over the past 30 days." : plans[0]?.trend.declining === false ? "Exposure has not declined over the past 30 days." : "") : `Exposure declined over the past 30 days for ${declining} of ${plans.length} assets.`} ${applied.length ? `Follow-up controls have been applied to ${applied.map((p) => p.symbol).join(", ")}.` : "No follow-up control has been applied."}`, "");
   L.push("| Asset | Resolution | Collateral | Debt backed | Baseline debt | Change | 30 days | Status |");
   L.push("|---|---|---:|---:|---:|---:|---:|---|");
   for (const p of plans) {
