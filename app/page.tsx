@@ -348,7 +348,7 @@ export default function Page() {
           <TxTab shown={shown} tx={tx} busy={txBusy} error={txError} positions={positions} colors={colors} entities={registry?.entities ?? []} onRetry={() => loadTx(shown, true)} />
         ) : null}
         {tab === "entities" ? (
-          <EntitiesTab registry={registry} positions={positions} shown={shown} tx={tx} txBusy={txBusy} colors={colors}
+          <EntitiesTab registry={registry} positions={positions} shown={shown} allAssets={assets} logoOf={logoOf} tx={tx} txBusy={txBusy} colors={colors}
             community={community} communityError={communityError} onCommunityChange={loadCommunity} />
         ) : null}
         {tab === "data" ? <DataTab asOf={asOf} /> : null}
@@ -453,6 +453,7 @@ function LoopsTab(props: {
 
       {current ? <HolderTx key={`${current.asset}:${current.p.address}`} row={current} rows={holder.rows} error={holder.error} colors={colors} /> : null}
       <Liquidations positions={positions} source={shown.length ? loops[shown[0].symbol]?.market.source : undefined} />
+      <ReportPanel kind="loops" asset={shown.length === 1 ? shown[0].symbol : undefined} />
 
       <p className="note">
         Health factor, leverage and the drop to liquidation come from Aave for the whole wallet: every collateral and every debt it holds on {shown.length ? loops[shown[0].symbol]?.market.venue ?? "Aave" : "Aave"}, not only this asset.
@@ -937,6 +938,8 @@ function PlanTab({ shown, logoOf, onPick, onAll }: { shown: Shown; logoOf: (s: s
 
       {plan.symbol === "rsETH" ? <KelpPanel /> : null}
 
+      <ReportPanel kind="offboarding" asset={plan.symbol} />
+
       {plan.path === "lt" && plan.ltSim ? <LtSimPanel plan={plan} /> : null}
       {plan.path === "rate" ? (
       <div className="panel">
@@ -1049,14 +1052,19 @@ function Markdown({ text }: { text: string }) {
   return <div className="report">{out}</div>;
 }
 
-function ReportPanel() {
-  const [report, setReport] = useState<{ markdown: string; month: string; generatedAt: string } | null>(null);
+function ReportPanel({ kind = "offboarding", asset }: { kind?: "offboarding" | "loops"; asset?: string }) {
+  const [report, setReport] = useState<{ markdown: string; generatedAt: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const qs = new URLSearchParams({ kind, ...(asset ? { asset } : {}) }).toString();
+  useEffect(() => { setReport(null); setError(null); }, [qs]);
+  const scope = asset ?? "all assets";
+  const title = kind === "loops" ? `Loop positions report · ${scope}` : asset ? `Offboarding report · ${asset}` : "Monthly progress report · all assets";
+  const what = kind === "loops" ? "Market summary, every tracked position with health factor and leverage, liquidations · Markdown" : asset ? "Debt against the baseline, trend, loop economics, plan steps and on-chain changes · Markdown" : "Summary, one section per asset, on-chain changes of the month · Markdown, ready for the forum";
   const build = () => {
     setBusy(true); setError(null);
-    getJson<{ markdown: string; month: string; generatedAt: string }>("/api/report").then(setReport).catch((e) => setError(e instanceof Error ? e.message : "Failed")).finally(() => setBusy(false));
+    getJson<{ markdown: string; generatedAt: string }>(`/api/report?${qs}`).then(setReport).catch((e) => setError(e instanceof Error ? e.message : "Failed")).finally(() => setBusy(false));
   };
   const copy = async () => {
     if (!report) return;
@@ -1065,14 +1073,14 @@ function ReportPanel() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div><h2>Monthly progress report</h2><p className="hint">Summary, one section per asset, on-chain changes of the month · Markdown, ready for the forum</p></div>
+        <div><h2>{title}</h2><p className="hint">{what}</p></div>
         <div className="report-actions">
           <button className="chip plain" onClick={build} disabled={busy}><span className={busy ? "spin" : ""} aria-hidden="true">↻</span> {busy ? "Building" : report ? "Rebuild" : "Build report"}</button>
           {report ? <button className="chip plain" onClick={copy}>{copied ? "Copied" : "Copy Markdown"}</button> : null}
-          {report ? <a className="chip plain" href="/api/report?download=1">Download .md</a> : null}
+          <a className="chip plain" href={`/api/report?${qs}&download=1`}>Download .md</a>
         </div>
       </div>
-      {error ? <p className="empty">Could not build the report: {error}</p> : report ? <div className="body"><Markdown text={report.markdown} /></div> : <p className="empty">Builds from today’s on-chain figures for every asset in scope. The first build reads each asset’s history, so it can take a few seconds.</p>}
+      {error ? <p className="empty">Could not build the report: {error}</p> : report ? <div className="body"><Markdown text={report.markdown} /></div> : <p className="empty">Builds from today’s on-chain figures for {scope}. Preview it here, or download it directly; the first build can take a few seconds.</p>}
     </div>
   );
 }
@@ -1605,6 +1613,7 @@ function TxTab(props: {
 function EntitiesTab(props: {
   registry: RegistryData | null; positions: Row[]; shown: Shown; tx: Record<string, Tx[]>; txBusy: boolean; colors: Map<string, string>;
   community: CommunityTag[]; communityError: string | null; onCommunityChange: () => void;
+  allAssets: { symbol: string; logo: string }[]; logoOf: (s: string) => string | undefined;
 }) {
   const { registry, positions, shown, tx, txBusy, colors, community, communityError, onCommunityChange } = props;
   const entities = registry?.entities ?? [];
@@ -1618,6 +1627,8 @@ function EntitiesTab(props: {
 
   return (
     <>
+      <HolderExport assets={props.allAssets} initial={shown.length === 1 ? shown[0].symbol : "all"} logoOf={props.logoOf} />
+
       <CommunityPanel positions={positions} entities={Array.from(new Set([...entities.map((e) => e.entity), ...community.map((t) => t.entity)]))}
         tags={community} error={communityError} colors={colors} onChange={onCommunityChange} />
 
@@ -2439,6 +2450,29 @@ function KelpPanel() {
         </div>
       </div>
       <p className="note body">Cycle length and range from Dialectic; equal batches rebuilt from them. Fee from the contract (5%), not the docs (10%). Kelp's instant-withdrawal fee (0.5%, switched off for ETH) is not in these figures.</p>
+    </div>
+  );
+}
+
+
+/** CSV of every holder above the dust line, from the holder mapping: one asset or all. */
+function HolderExport({ assets, initial, logoOf }: { assets: { symbol: string; logo: string }[]; initial: string; logoOf: (s: string) => string | undefined }) {
+  const [asset, setAsset] = useState(initial);
+  useEffect(() => setAsset(initial), [initial]);
+  const href = `/api/holders?asset=${encodeURIComponent(asset)}`;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div><h2>Export holders</h2><p className="hint">Every holder above $50 with tag, position type, collateral, debt by asset, health factor, leverage and Spark debt · CSV</p></div>
+        <div className="head-actions export">
+          <select value={asset} onChange={(e) => setAsset(e.target.value)} aria-label="Asset to export">
+            <option value="all">All assets</option>
+            {assets.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
+          </select>
+          <a className="chip plain" href={href} download>{asset !== "all" ? <AssetLogo symbol={asset} src={logoOf(asset)} /> : null} Download CSV</a>
+        </div>
+      </div>
+      <p className="note body">{asset === "all" ? `One file with the holders of all ${assets.length} assets, one row per wallet and asset. The first export can take up to a minute while each holder list is read.` : `Holders of ${asset} on Aave V3 Core, largest first.`}</p>
     </div>
   );
 }

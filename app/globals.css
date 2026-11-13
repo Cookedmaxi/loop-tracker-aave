@@ -453,3 +453,7 @@ table.mini th, table.mini td { padding: 5px 6px; border-bottom: 1px solid var(--
 table.mini th { color: var(--muted); font-weight: 500; }
 table.mini .r { text-align: right; }
 td.pos { color: var(--green); }
+.head-actions.export select { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: 13px var(--sans); }
+.head-actions.export .chip { display: inline-flex; align-items: center; gap: 6px; }
+.head-actions.export .logo { width: 16px; height: 16px; }
+@media (max-width: 700px) { .head-actions.export { width: 100%; } .head-actions.export select { flex: 1; } }
