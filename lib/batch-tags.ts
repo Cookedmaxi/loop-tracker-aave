@@ -42,7 +42,7 @@ export async function checkBatch(text: string, defaultEntity: string): Promise<B
   const ctl = await Promise.all(maps.map((m) => controllers(m).catch(() => null)));
   const community = await listCommunityTags().catch(() => []);
   return lines.map((l) => {
-    if (!l.valid) return { address: l.address, entity: l.entity, label: l.label, status: "invalid", matches: [], existing: null };
+    if (!l.valid) return { address: l.address, entity: null, label: null, status: "invalid", matches: [], existing: null };
     const low = l.address.toLowerCase();
     const matches: BatchMatch[] = [];
     maps.forEach((m, i) => {
@@ -59,7 +59,9 @@ export async function checkBatch(text: string, defaultEntity: string): Promise<B
       : direct.some((x) => x.debtBackedUsd >= MIN_DEBT_USD) ? "borrower"
       : matches.some((x) => x.via) ? "controls"
       : direct.length ? "holder" : "none";
-    const team = tagOf(l.address as `0x${string}`);
+    // A team tag that only says "Unknown whale" does not block a real name.
+    const team0 = tagOf(l.address as `0x${string}`);
+    const team = team0 && !/^unknown/i.test(team0.entity) ? team0 : null;
     const site = community.find((t) => t.address.toLowerCase() === low);
     return { address: l.address, entity: l.entity, label: l.label, status, matches, existing: team ? `${team.entity} (team tag)` : site ? `${site.entity} (site tag by ${site.author})` : null };
   });
