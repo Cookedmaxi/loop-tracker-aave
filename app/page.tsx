@@ -1629,6 +1629,8 @@ function EntitiesTab(props: {
     <>
       <HolderExport assets={props.allAssets} initial={shown.length === 1 ? shown[0].symbol : "all"} logoOf={props.logoOf} />
 
+      <BatchTagPanel colors={colors} onChange={onCommunityChange} />
+
       <CommunityPanel positions={positions} entities={Array.from(new Set([...entities.map((e) => e.entity), ...community.map((t) => t.entity)]))}
         tags={community} error={communityError} colors={colors} onChange={onCommunityChange} />
 
@@ -2473,6 +2475,114 @@ function HolderExport({ assets, initial, logoOf }: { assets: { symbol: string; l
         </div>
       </div>
       <p className="note body">{asset === "all" ? `One file with the holders of all ${assets.length} assets, one row per wallet and asset. The first export can take up to a minute while each holder list is read.` : `Holders of ${asset} on Aave V3 Core, largest first.`}</p>
+    </div>
+  );
+}
+
+
+type BatchStatus = "loop" | "borrower" | "holder" | "controls" | "none" | "invalid";
+interface BatchRowUI {
+  address: string; entity: string | null; label: string | null; status: BatchStatus;
+  matches: { asset: string; rank: number; kind: string; suppliedUsd: number; debtBackedUsd: number; via?: string; position?: string }[];
+  existing: string | null; added?: boolean; error?: string;
+}
+const BATCH_LABEL: Record<BatchStatus, string> = { loop: "Loop", borrower: "Borrower", controls: "Controls a position", holder: "Holder, no debt", none: "Not a holder", invalid: "Not an address" };
+
+/** Paste a list of addresses: each is checked against every tracked asset, and the ones that fit get a site tag. */
+function BatchTagPanel({ colors, onChange }: { colors: Map<string, string>; onChange: () => void }) {
+  const [text, setText] = useState("");
+  const [entity, setEntity] = useState("");
+  const [rows, setRows] = useState<BatchRowUI[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [include, setInclude] = useState<BatchStatus[]>(["loop", "borrower", "controls"]);
+  const [author, setAuthor] = useState("");
+  const [reasoning, setReasoning] = useState("");
+  const [confidence, setConfidence] = useState<CommunityTag["confidence"]>("Probable");
+  const [links, setLinks] = useState("");
+  const [done, setDone] = useState<string | null>(null);
+  useEffect(() => { try { setAuthor(localStorage.getItem(NAME_KEY) ?? ""); } catch { /* storage blocked */ } }, []);
+
+  const post = async (apply: boolean) => {
+    setBusy(true); setError(null); setDone(null);
+    try {
+      if (apply) { try { localStorage.setItem(NAME_KEY, author); } catch { /* storage blocked */ } }
+      const r = await fetch("/api/community-tags/batch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, entity, apply, include, author, reasoning, confidence, links }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "Failed");
+      setRows(j.rows);
+      if (apply) {
+        const n = (j.rows as BatchRowUI[]).filter((x) => x.added).length;
+        setDone(`${n} address${n === 1 ? "" : "es"} tagged.`);
+        onChange();
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  };
+  const count = (s: BatchStatus) => rows?.filter((r) => r.status === s).length ?? 0;
+  const toAdd = rows?.filter((r) => include.includes(r.status) && !r.existing && r.entity && !r.added).length ?? 0;
+  const toggle = (s: BatchStatus) => setInclude((xs) => (xs.includes(s) ? xs.filter((x) => x !== s) : [...xs, s]));
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div><h2>Batch tag addresses</h2><p className="hint">Paste addresses from a sheet or an Arkham/DeBank list: each is checked against all tracked assets, and those that hold, loop or control a position can be tagged in one go</p></div>
+      </div>
+      <div className="body batch">
+        <div className="batch-input">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={7} spellCheck={false}
+            placeholder={"One address per line, optionally followed by the entity and a label:\n0x40E9…AbA8, Galaxy Digital, Safe\n0x1234…abcd\n0x5678…ef01, Trend Research"} />
+          <div className="batch-side">
+            <label>Entity for lines without one<input value={entity} onChange={(e) => setEntity(e.target.value)} placeholder="e.g. Trend Research" /></label>
+            <button className="chip plain" onClick={() => post(false)} disabled={busy || !text.trim()}>{busy && !rows ? "Checking…" : "Check addresses"}</button>
+            <p className="note">Up to 500 addresses. Duplicates are skipped. Nothing is saved until you confirm.</p>
+          </div>
+        </div>
+        {error ? <p className="neg">{error}</p> : null}
+      </div>
+      {rows ? (
+        <>
+          <div className="strip inner">
+            <Cell label="Loops" value={fmt(count("loop"))} tone={count("loop") ? "pos" : ""} sub="back $10k+ of debt, same-family debt" />
+            <Cell label="Borrowers" value={fmt(count("borrower"))} sub="back $10k+ of other debt" />
+            <Cell label="Control a position" value={fmt(count("controls"))} sub="Safe signer or owner" />
+            <Cell label="Holders, no debt" value={fmt(count("holder"))} />
+            <Cell label="Not holders" value={fmt(count("none") + count("invalid"))} sub={count("invalid") ? `${count("invalid")} not valid addresses` : undefined} />
+          </div>
+          <div className="scroll batch-table">
+            <table className="stack overview">
+              <thead><tr><th>Address</th><th>Entity</th><th>Result</th><th>Where</th><th>Already tagged</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.address} className={r.status === "none" || r.status === "invalid" ? "dim" : ""}>
+                    <td className="mono nw">{/^0x[0-9a-fA-F]{40}$/.test(r.address) ? <a className="link" href={`https://debank.com/profile/${r.address}`} target="_blank" rel="noopener noreferrer">{short(r.address)}</a> : r.address}</td>
+                    <td data-label="Entity">{r.entity ? <EntityTag entity={r.entity} colors={colors} /> : <span className="muted">none given</span>}{r.label ? <span className="sub">{r.label}</span> : null}</td>
+                    <td data-label="Result"><span className={`status ${r.added ? "done" : r.status === "loop" || r.status === "borrower" || r.status === "controls" ? "pending" : "wait"}`}>{r.added ? "Tagged" : BATCH_LABEL[r.status]}</span>{r.error ? <span className="sub neg">{r.error}</span> : null}</td>
+                    <td data-label="Where">{r.matches.length ? r.matches.slice(0, 4).map((m, i) => <span key={i} className="sub">{m.via ? `${m.via} of ${short(m.position!)}: ` : ""}{m.asset} #{m.rank} · {m.kind}{m.debtBackedUsd >= 1 ? ` · ${usd(m.debtBackedUsd)} debt` : ` · ${usd(m.suppliedUsd)}`}</span>) : DASH}</td>
+                    <td data-label="Already tagged">{r.existing ?? DASH}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="body batch-apply">
+            <div className="seg" role="group" aria-label="Tag which">
+              {(["loop", "borrower", "controls", "holder"] as BatchStatus[]).map((s) => <button key={s} aria-pressed={include.includes(s)} onClick={() => toggle(s)}>{BATCH_LABEL[s]} ({count(s)})</button>)}
+            </div>
+            <div className="batch-fields">
+              <label>Your name<input value={author} onChange={(e) => setAuthor(e.target.value)} /></label>
+              <label>Source<input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="e.g. Arkham entity page, team borrower sheet" /></label>
+              <label>Confidence<select value={confidence} onChange={(e) => setConfidence(e.target.value as CommunityTag["confidence"])}><option>Confirmed</option><option>Probable</option><option>Possible</option></select></label>
+              <label>Links<input value={links} onChange={(e) => setLinks(e.target.value)} placeholder="https://… (optional)" /></label>
+            </div>
+            <div className="head-actions">
+              <button className="chip" onClick={() => post(true)} disabled={busy || !toAdd || !author.trim() || reasoning.trim().length < 10}>{busy ? "Tagging…" : `Add ${toAdd} tag${toAdd === 1 ? "" : "s"}`}</button>
+              {done ? <span className="pos">{done}</span> : null}
+            </div>
+            <p className="note">Addresses already tagged, or with no entity, are skipped. A signer or owner is tagged on the position it controls. Tags appear as site tags, removable by their author.</p>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -23,7 +23,7 @@ async function mappingSoon(symbol: string): Promise<MappingResponse | null> {
 
 /** Who controls each tracked contract position: Safe signers and owner(). Cached an hour per asset. */
 const controlCache = new Map<string, { at: number; value: Promise<Map<string, { via: string; positions: string[] }>> }>();
-function controllers(m: MappingResponse) {
+export function controllers(m: MappingResponse) {
   const hit = controlCache.get(m.symbol);
   if (hit && Date.now() - hit.at < 3_600_000) return hit.value;
   const value = (async () => {

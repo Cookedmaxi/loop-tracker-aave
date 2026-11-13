@@ -457,3 +457,15 @@ td.pos { color: var(--green); }
 .head-actions.export .chip { display: inline-flex; align-items: center; gap: 6px; }
 .head-actions.export .logo { width: 16px; height: 16px; }
 @media (max-width: 700px) { .head-actions.export { width: 100%; } .head-actions.export select { flex: 1; } }
+/* Batch tagging */
+.body.batch { gap: 10px; }
+.batch-input { display: grid; grid-template-columns: 1fr 260px; gap: 14px; }
+.batch-input textarea { width: 100%; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12.5px var(--mono, ui-monospace, monospace); resize: vertical; }
+.batch-side { display: flex; flex-direction: column; gap: 10px; }
+.batch-side label, .batch-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.batch-side input, .batch-fields input, .batch-fields select { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: 13px var(--sans); }
+.batch-table { max-height: 420px; overflow: auto; }
+.body.batch-apply { gap: 12px; border-top: 1px solid var(--line); }
+.batch-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+span.pos { color: var(--green); font-size: 13px; }
+@media (max-width: 800px) { .batch-input { grid-template-columns: 1fr; } .batch-fields { grid-template-columns: 1fr 1fr; } }
